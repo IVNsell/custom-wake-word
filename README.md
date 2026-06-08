@@ -162,20 +162,6 @@ Rough formula: `trigger_frames × 80ms` audio buffer + a few ms onnx.
 | GPU | optional, speeds up feature extraction |
 | Mic | only for `listen.py` |
 
-## Notes
-
-- Non-English phrases work but need more recordings and a decent negative set.
-- Building negatives from hundreds of thousands of files can take hours.
-- Large audio is gitignored — clone is just code + config.
-
-| in git | not in git |
-|--------|------------|
-| code, config, docs, LICENSE | `data/negatives/*.wav` |
-| | `data/features/*.npy` |
-| | `workspace/recordings/`, `output/`, `.venv` |
-
-Free speech for negatives: [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset), [Common Voice](https://github.com/common-voice/cv-dataset).
-
 ## License
 
 MIT — see [LICENSE](LICENSE). openWakeWord is Apache 2.0.
