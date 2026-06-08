@@ -40,7 +40,14 @@ python scripts/admin_build_negatives.py --features-only
 
 **2. Record your phrase**
 
-Drop 3–10 WAV files into `workspace/recordings/`. Each clip should be just the wake word, ~0.6–2.5 s, quiet room. 16 kHz mono is ideal; stereo 48 kHz also works.
+Drop WAV files into `workspace/recordings/`:
+
+| | |
+|---|---|
+| Clips | 3–10 files |
+| Duration | 0.6–2.5 s each |
+| Content | only the wake phrase, no background noise |
+| Format | WAV, 16 kHz mono preferred (stereo 48 kHz ok) |
 
 ```bash
 python scripts/validate_recordings.py "aizek"
@@ -70,9 +77,19 @@ On my machine inference is ~2 ms per chunk; end-to-end trigger is roughly 80–2
 
 ## Pipeline
 
-Recordings → augment (~×80) + mix with negatives → openWakeWord features → train DNN against `shared_negatives.npy` → export ONNX.
+```
+recordings (3–10 wav)
+    → augment (~×80) + mix with negatives
+    → openWakeWord embeddings
+    → train DNN on shared_negatives.npy
+    → phrase.onnx
+```
 
-Users only record their phrase. Whoever runs the platform maintains `data/negatives/` once and reuses it for every model.
+| who | does what |
+|-----|-----------|
+| user | records their wake phrase |
+| platform | keeps `data/negatives/` (noise + speech corpus) |
+| scripts | augment, train, export onnx |
 
 ## Layout
 
@@ -89,11 +106,14 @@ src/wakeword/            # library
 
 ## Scripts
 
-- `admin_build_negatives.py` — build negative feature bank
-- `validate_recordings.py "phrase"` — check recordings before train
-- `train_user_phrase.py "phrase"` — full train pipeline
-- `listen.py model.onnx` — mic test
-- `benchmark_latency.py model.onnx` — timing
+| script | what it does |
+|--------|--------------|
+| `admin_build_negatives.py` | index `data/negatives/` → `shared_negatives.npy` |
+| `admin_build_negatives.py --features-only` | embeddings only (wav prep already done) |
+| `validate_recordings.py "phrase"` | check recordings before train |
+| `train_user_phrase.py "phrase"` | augment + train + export onnx |
+| `listen.py model.onnx` | live mic test |
+| `benchmark_latency.py model.onnx` | p50/p95 latency |
 
 ## Python
 
@@ -124,15 +144,37 @@ inference:
   refractory_sec: 2.0
 ```
 
-Latency is roughly `trigger_frames × 80ms` of audio buffering plus a few ms of ONNX.
+| `trigger_frames` | latency | false triggers |
+|------------------|---------|----------------|
+| 1 | ~80 ms | more |
+| 2 | ~160 ms | medium |
+| 3 | ~240 ms | fewer |
+
+Rough formula: `trigger_frames × 80ms` audio buffer + a few ms onnx.
+
+## Requirements
+
+| | |
+|---|---|
+| Python | 3.10+ |
+| OS | Windows / Linux |
+| RAM | 8 GB (16 GB if indexing a huge negative set) |
+| GPU | optional, speeds up feature extraction |
+| mic | only for `listen.py` |
 
 ## Notes
 
 - Non-English phrases work but need more recordings and a decent negative set.
 - Building negatives from hundreds of thousands of files can take hours.
-- Large audio (`data/negatives/`, `*.npy`, recordings, models) is gitignored — clone is just code + config.
+- Large audio is gitignored — clone is just code + config.
 
-Good free speech sources for negatives: [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset), [Common Voice](https://github.com/common-voice/cv-dataset).
+| in git | not in git |
+|--------|------------|
+| code, config, docs, LICENSE | `data/negatives/*.wav` |
+| | `data/features/*.npy` |
+| | `workspace/recordings/`, `output/`, `.venv` |
+
+Free speech for negatives: [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset), [Common Voice](https://github.com/common-voice/cv-dataset).
 
 ## License
 
