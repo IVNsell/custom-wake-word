@@ -42,8 +42,8 @@ python scripts/admin_build_negatives.py --features-only
 
 Drop WAV files into `workspace/recordings/`:
 
-| | |
-|---|---|
+| Rule | Value |
+|------|-------|
 | Clips | 3–10 files |
 | Duration | 0.6–2.5 s each |
 | Content | only the wake phrase, no background noise |
@@ -154,13 +154,13 @@ Rough formula: `trigger_frames × 80ms` audio buffer + a few ms onnx.
 
 ## Requirements
 
-| | |
-|---|---|
+| Component | Minimum |
+|-----------|---------|
 | Python | 3.10+ |
 | OS | Windows / Linux |
 | RAM | 8 GB (16 GB if indexing a huge negative set) |
 | GPU | optional, speeds up feature extraction |
-| mic | only for `listen.py` |
+| Mic | only for `listen.py` |
 
 ## Notes
 
