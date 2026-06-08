@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# IDE / локальное
+.vscode/
+.idea/
+.specstory/
+*.log
+
+# Данные (не коммитить — слишком большие)
+data/negatives/**/*
+!data/negatives/README.md
+!data/negatives/**/.gitkeep
+
+data/features/*.npy
+data/features/_staging_neg_wav/
+
+# Пользовательские записи и артефакты обучения
+workspace/**/*
+!workspace/recordings/.gitkeep
+
+output/**/*
+!output/.gitkeep
+
+# Веса (ONNX в catalog можно коммитить вручную, если маленькие)
+*.pt
+
+# OS
+Thumbs.db
+.DS_Store

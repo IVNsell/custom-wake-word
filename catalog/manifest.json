@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "Бесплатный каталог готовых wake word (.onnx). Положите модели в catalog/models/",
+  "models": [
+    {
+      "id": "example_hey_maxim",
+      "phrase": "эй максим",
+      "language": "ru",
+      "file": "hey_maxim.onnx",
+      "threshold": 0.55,
+      "enabled": false,
+      "note": "Замените на реальную модель после обучения"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+# Конфиг платформы wake word для ассистента
+
+phrase:
+  # Короткая фраза: имя ассистента, 1–3 слова
+  max_words: 3
+  max_duration_sec: 2.5
+
+recordings:
+  min_count: 3
+  max_count: 10
+  recommended_count: 7
+  sample_rate: 16000
+  channels: 1
+  # Подсказки для UI: разное расстояние, тон, темп
+  hints:
+    - "Нормальным голосом, 30–50 см от микрофона"
+    - "Чуть тише / чуть громче"
+    - "Быстрее и медленнее"
+    - "Слегка поверните голову в сторону"
+
+training:
+  # 3 записи × 80 ≈ 240 позитивов; 10 × 80 ≈ 800 (+ вариации внутри раунда)
+  augmentation_rounds: 80
+  train_split: 0.85
+  steps: 35000
+  layer_size: 32
+  model_type: dnn
+  target_false_positives_per_hour: 0.2
+  max_negative_weight: 1500
+  # Доп. синтетика через TTS (если установлен piper) — усиливает при 3–5 записях
+  optional_tts_positives: 2000
+
+paths:
+  negatives_root: data/negatives
+  negatives_features: data/features/shared_negatives.npy
+  catalog_dir: catalog/models
+  catalog_manifest: catalog/manifest.json
+  user_recordings: workspace/recordings
+  user_output: output/user_models
+  temp_training: workspace/training
+
+inference:
+  sample_rate: 16000
+  frame_samples: 1280  # 80 ms — минимальный шаг openWakeWord
+  threshold: 0.5
+  # 3 = ~240 ms (стабильно), 2 = ~160 ms, 1 = ~80 ms (быстро, больше ложных)
+  trigger_frames: 2
+  refractory_sec: 2.0
