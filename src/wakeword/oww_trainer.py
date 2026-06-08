@@ -1,4 +1,4 @@
-"""Локальное обучение wake word на готовых .npy features (без openWakeWord train.py)."""
+"""Train a small DNN on precomputed features and export to ONNX (no openWakeWord train.py)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 
 class WakeWordDNN(nn.Module):
-    """Та же архитектура, что openWakeWord model_type=dnn."""
+    """Same architecture as openWakeWord model_type=dnn (layer_dim=32 default)."""
 
     def __init__(self, input_shape: tuple[int, int] = (16, 96), layer_dim: int = 32, n_blocks: int = 1):
         super().__init__()
@@ -61,6 +61,7 @@ def _sample_batch(
     n_neg: int,
     rng: np.random.Generator,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Random mini-batch of positive and negative feature vectors."""
     pi = rng.integers(0, pos.shape[0], size=n_pos)
     ni = rng.integers(0, neg.shape[0], size=n_neg)
     x = np.vstack([pos[pi], neg[ni]]).astype(np.float32)
@@ -69,6 +70,7 @@ def _sample_batch(
 
 
 def _export_onnx(model: WakeWordDNN, input_shape: tuple[int, int], output_onnx: Path) -> None:
+    """Export to ONNX; suppress stdout to avoid Windows cp1251 emoji crashes."""
     model.cpu().eval()
     dummy = torch.randn(1, *input_shape)
     buf = io.StringIO()
@@ -93,13 +95,14 @@ def train_and_export_onnx(
     val_split: float = 0.15,
     device: str | None = None,
 ) -> Path:
+    """Train classifier on .npy features and save best checkpoint as ONNX."""
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Обучение на: {device}")
+    print(f"Training on: {device}")
 
     pos = np.load(pos_features_path, mmap_mode="r")
     neg = np.load(neg_features_path, mmap_mode="r")
     if pos.ndim != 3 or neg.ndim != 3:
-        raise ValueError(f"Ожидался shape (N, 16, 96), получено pos={pos.shape}, neg={neg.shape}")
+        raise ValueError(f"Expected shape (N, 16, 96), got pos={pos.shape}, neg={neg.shape}")
 
     input_shape = (int(pos.shape[1]), int(pos.shape[2]))
     n_val = max(1, int(pos.shape[0] * val_split))
@@ -110,7 +113,7 @@ def train_and_export_onnx(
     pos_train = np.asarray(pos[train_idx])
     pos_val = np.asarray(pos[val_idx])
 
-    # Валидация: позитивы + случайные негативы
+    # Validation set: held-out positives + random negatives
     n_val_neg = min(2000, neg.shape[0])
     neg_val_idx = rng.integers(0, neg.shape[0], size=n_val_neg)
     neg_val = np.asarray(neg[neg_val_idx])
@@ -129,6 +132,7 @@ def train_and_export_onnx(
 
     pbar = tqdm(range(steps), desc="train")
     for step in pbar:
+        # Gradually increase weight on negatives to reduce false activations
         neg_w = 1.0 + (max_negative_weight - 1.0) * (step / max(steps - 1, 1))
         x, y = _sample_batch(pos_train, neg, n_pos_batch, n_neg_batch, rng_train)
         x, y = x.to(device), y.to(device)
@@ -162,8 +166,8 @@ def train_and_export_onnx(
     torch.save(model.state_dict(), weights_path)
 
     _export_onnx(model, input_shape, output_onnx)
-    print(f"OK: ONNX сохранён: {output_onnx}")
-    print(f"OK: Веса PyTorch: {weights_path}")
+    print(f"OK: ONNX saved: {output_onnx}")
+    print(f"OK: PyTorch weights: {weights_path}")
     return output_onnx
 
 
@@ -173,9 +177,10 @@ def export_onnx_from_weights(
     input_shape: tuple[int, int] = (16, 96),
     layer_size: int = 32,
 ) -> Path:
+    """Re-export ONNX from saved .pt weights without retraining."""
     model = WakeWordDNN(input_shape=input_shape, layer_dim=layer_size)
     model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     output_onnx.parent.mkdir(parents=True, exist_ok=True)
     _export_onnx(model, input_shape, output_onnx)
-    print(f"OK: ONNX из весов: {output_onnx}")
+    print(f"OK: ONNX from weights: {output_onnx}")
     return output_onnx

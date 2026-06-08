@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Один раз: проиндексировать data/negatives/ → shared_negatives.npy."""
+"""Index data/negatives/ into shared_negatives.npy (admin, run once)."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from wakeword.features import build_negative_features
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, default=None)
-    p.add_argument("--max-source-files", type=int, default=None, help="Лимит исходных файлов")
+    p.add_argument("--max-source-files", type=int, default=None, help="Limit source file count")
     p.add_argument(
         "--features-only",
         action="store_true",
-        help="Только embeddings (staging уже готов, без повторного prepare)",
+        help="Embeddings only (staging chunks already prepared)",
     )
     args = p.parse_args()
 
@@ -29,15 +29,15 @@ def main():
     neg_root = resolve_path(cfg, "negatives_root")
     out = resolve_path(cfg, "negatives_features")
 
-    print(f"Корпус: {neg_root}")
-    print(f"Выход: {out}")
+    print(f"Corpus: {neg_root}")
+    print(f"Output: {out}")
     build_negative_features(
         neg_root,
         out,
         max_files=args.max_source_files,
         features_only=args.features_only,
     )
-    print("OK: Готово")
+    print("OK: Done")
 
 
 if __name__ == "__main__":

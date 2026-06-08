@@ -1,3 +1,5 @@
+"""End-to-end training pipeline: recordings → augment → features → ONNX."""
+
 from __future__ import annotations
 
 import re
@@ -14,20 +16,11 @@ from .recordings import validate_phrase, validate_recordings_dir
 
 
 def _slug(phrase: str) -> str:
+    """Convert phrase to safe filesystem / model name."""
     s = phrase.strip().lower()
     s = re.sub(r"[^\w\s-]", "", s, flags=re.UNICODE)
     s = re.sub(r"\s+", "_", s)
     return s[:48] or "wake_word"
-
-
-def _openwakeword_train_script() -> Path | None:
-    """Legacy: openWakeWord train.py (не используется — несовместимость speechbrain/torchaudio)."""
-    try:
-        import openwakeword
-
-        return Path(openwakeword.__file__).parent / "train.py"
-    except ImportError:
-        return None
 
 
 def generate_oww_training_yaml(
@@ -37,7 +30,7 @@ def generate_oww_training_yaml(
     neg_features: Path | None,
     cfg: dict,
 ) -> Path:
-    """Конфиг для openWakeWord train.py — позитивы из записей пользователя."""
+    """Generate openWakeWord-style YAML (for --prepare-only mode)."""
     feature_files: dict[str, str] = {"positive": str(pos_features.resolve())}
     batch: dict[str, int] = {"positive": 64, "adversarial_negative": 32}
 
@@ -45,7 +38,6 @@ def generate_oww_training_yaml(
         feature_files["platform_negatives"] = str(neg_features.resolve())
         batch["platform_negatives"] = 960
 
-    # Базовый ACAV — скачайте один раз в data/features/ (см. README)
     acav = ROOT / "data" / "features" / "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
     if acav.exists():
         feature_files["ACAV100M_sample"] = str(acav.resolve())
@@ -80,8 +72,8 @@ def train_user_phrase(
     skip_oww_train: bool = False,
 ) -> Path:
     """
-    Полный цикл: 3–10 WAV → аугментация → features → openWakeWord train → ONNX.
-    Возвращает путь к .onnx.
+    Full training cycle: 3-10 WAV → augmentation → features → train → ONNX.
+    Returns path to the exported .onnx model.
     """
     cfg = cfg or load_config()
     cfg["_phrase"] = phrase
@@ -113,16 +105,16 @@ def train_user_phrase(
         neg_root,
         rounds=rounds,
     )
-    print(f"OK: Создано {n_aug} аугментированных позитивов из {len(validation.files)} записей")
+    print(f"OK: Created {n_aug} augmented positives from {len(validation.files)} recordings")
 
     pos_feat = work / "positive_features.npy"
     extract_features_from_wavs(aug_dir, pos_feat)
-    print(f"OK: Позитивные features: {pos_feat}")
+    print(f"OK: Positive features: {pos_feat}")
 
     neg_feat_path = resolve_path(cfg, "negatives_features")
     if not neg_feat_path.exists():
         raise FileNotFoundError(
-            f"Нет {neg_feat_path}. Сначала: python scripts/admin_build_negatives.py --features-only"
+            f"Missing {neg_feat_path}. Run: python scripts/admin_build_negatives.py"
         )
 
     out_user = resolve_path(cfg, "user_output") / model_name
@@ -132,7 +124,7 @@ def train_user_phrase(
     if skip_oww_train:
         yaml_path = generate_oww_training_yaml(model_name, work, pos_feat, neg_feat_path, cfg)
         shutil.copy2(yaml_path, out_user / "training_config.yaml")
-        print(f"OK: Подготовлено (train пропущен): {out_user}")
+        print(f"OK: Prepared (train skipped): {out_user}")
         return out_user
 
     train_and_export_onnx(
@@ -153,5 +145,5 @@ def train_user_phrase(
         "onnx": str(onnx_dst.name),
     }
     (out_user / "meta.yaml").write_text(yaml.dump(meta, allow_unicode=True), encoding="utf-8")
-    print(f"OK: Модель: {onnx_dst}")
+    print(f"OK: Model saved: {onnx_dst}")
     return onnx_dst

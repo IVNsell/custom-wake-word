@@ -1,29 +1,35 @@
-# Общий корпус негативов (ваша зона ответственности)
+# Shared negative audio corpus
 
-Сюда кладёте **часы** фонового аудио **без** wake-фразы пользователей.
+Place **hours** of background audio here — anything that is **not** a user's wake phrase.
 
-## Структура (пример)
+## Suggested folders
 
 ```
 data/negatives/
-  rain/          # дождь, гроза
-  music/         # музыка разных жанров
-  road/          # улица, машины
-  home/          # бытовой фон
-  speech_ru/     # русская речь (не имя ассистента)
-  speech_en/
-  speech_other/  # другие языки
-  tv/            # телевизор, подкасты
+  rain/           # rain, thunder
+  road/           # traffic, street
+  music/          # various genres
+  home/           # household ambient
+  speech_ru/      # Russian speech (no wake words)
+  speech_en/      # English speech
+  speech_other/   # other languages (de/, es/, …)
+  tv/             # TV, podcasts, streams
+  noise/          # misc ambient clips
 ```
 
-Формат: `.wav` или `.flac`, моно предпочтительно (стерео конвертируется при индексации).
+**Formats:** `.wav`, `.flac`, `.mp3`, `.ogg`  
+**File names:** any  
+**Subfolders:** allowed (scanned recursively)
 
-## После наполнения
+## After adding files
 
-Один раз (или при обновлении корпуса):
-
-```powershell
+```bash
 python scripts/admin_build_negatives.py
 ```
 
-Создаст `data/features/shared_negatives.npy` — эмбеддинги для обучения всех пользовательских моделей.
+Creates `data/features/shared_negatives.npy` used by all user models.
+
+## Free speech datasets
+
+- [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset)
+- [Mozilla Common Voice](https://github.com/common-voice/cv-dataset)

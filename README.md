@@ -1,45 +1,30 @@
 # Custom Wake Word
 
-Open-source платформа wake word на Python: **своя короткая фраза** (3–10 записей), **общий корпус шума**, обучение локально, инференс через **ONNX на CPU** (~2 ms на чанк).
+Train your own **short wake phrase** (like Porcupine) with **3–10 voice recordings**, run inference on **CPU via ONNX** (~2 ms per chunk), fully **offline**.
 
-> **Имя папки и GitHub:** локально проект может лежать в `custom-wake-word`, а репозиторий на GitHub называться иначе (например `phrase-wake`) — это нормально. Подробнее: [GITHUB.md](GITHUB.md).
-
-Подходит для голосовых ассистентов: пользователь записывает имя бота, вы один раз собираете фоновый аудио-корпус, модель обучается и работает офлайн.
+Built for voice assistants: users record a custom trigger word; you maintain a shared noise corpus once; everyone gets a personal `.onnx` model.
 
 ---
 
-## Возможности
+## What is this?
 
-- Обучение **любой короткой фразы** (1–3 слова) из **3–10 WAV** пользователя
-- Общий **корпус негативов** (дождь, дорога, музыка, речь на разных языках) — один раз для всех моделей
-- Аугментация записей (pitch, tempo, gain, микс с шумом)
-- Экспорт **`.onnx`** — совместим с [openWakeWord](https://github.com/dscripka/openWakeWord) inference
-- **Каталог** готовых бесплатных фраз (`catalog/`)
-- Скорость inference **~2–3 ms** (p50 на CPU), end-to-end **~80–250 ms** (настраивается)
-- Python API для встраивания в ассистент
+A Python toolkit that lets you:
 
----
+1. **Record** a short phrase 3–10 times (e.g. "hey nova", "aizek")
+2. **Train** a tiny wake-word model locally (~6–10 min)
+3. **Run** always-on detection from the microphone (~80–250 ms latency)
 
-## Требования
-
-| Компонент | Минимум |
-|-----------|---------|
-| Python | **3.10+** |
-| ОС | Windows / Linux |
-| RAM | 8 GB+ (16 GB для большого корпуса) |
-| GPU | Опционально (ускоряет `admin_build_negatives`, train ~6 мин и на CPU) |
-| Микрофон | Для `listen.py` + `pip install sounddevice` |
+No cloud. No subscription. Open source.
 
 ---
 
-## Установка
+## Quick start
+
+### 1. Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/phrase-wake.git
-cd phrase-wake
-```
-
-Имя папки после clone = имя репозитория на GitHub. Локально у вас может быть другое имя — на работу не влияет.
+git clone https://github.com/IVNsell/custom-wake-word.git
+cd custom-wake-word
 
 python -m venv .venv
 
@@ -50,161 +35,135 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-pip install sounddevice   # для проверки с микрофона
+pip install sounddevice   # microphone test only
 ```
 
-Проверка GPU (опционально):
+### 2. Build the noise corpus (admin, once)
 
-```bash
-python -c "import torch; print('CUDA:', torch.cuda.is_available())"
-```
-
----
-
-## Быстрый старт (полный цикл)
-
-### Шаг 1. Корпус шума (админ, один раз)
-
-Положите аудио в `data/negatives/` — см. [data/negatives/README.md](data/negatives/README.md).
-
-Подпапки: `rain/`, `road/`, `music/`, `speech_ru/`, `speech_en/`, `speech_other/` и т.д.  
-Форматы: `.wav`, `.flac`, `.mp3`, `.ogg`. Имена файлов любые.
+Drop background audio into `data/negatives/` — see [data/negatives/README.md](data/negatives/README.md).
 
 ```bash
 python scripts/admin_build_negatives.py
 ```
 
-Долго при большом корпусе (часы). Если `prepare` уже прошёл, а упал только `features`:
+This can take **hours** with a large corpus. If preparation finished but features failed:
 
 ```bash
 python scripts/admin_build_negatives.py --features-only
 ```
 
-Результат: `data/features/shared_negatives.npy`
+Output: `data/features/shared_negatives.npy`
 
-### Шаг 2. Записи пользователя (3–10 файлов)
+### 3. Record your wake phrase
 
-Папка: `workspace/recordings/`
+Put **3–10** WAV files in `workspace/recordings/`:
 
-| Параметр | Значение |
-|----------|----------|
-| Файлов | 3–10 |
-| Длина клипа | 0.6–2.5 сек |
-| Содержимое | Только wake-фраза, без фона |
-| Формат | WAV, лучше 16 kHz mono (48000 stereo тоже ок) |
-
-Проверка:
+| Rule | Value |
+|------|-------|
+| Clips | 3–10 files |
+| Duration | 0.6–2.5 seconds each |
+| Content | **Only** the wake phrase, no background noise |
+| Format | WAV, 16 kHz mono preferred |
 
 ```bash
-python scripts/validate_recordings.py "айзек"
+python scripts/validate_recordings.py "aizek"
 ```
 
-### Шаг 3. Обучение
+### 4. Train
 
 ```bash
-python scripts/train_user_phrase.py "айзек"
+python scripts/train_user_phrase.py "aizek"
 ```
 
-~6–10 минут. Модель:
+Model output:
 
 ```
-output/user_models/айзек/айзек.onnx
+output/user_models/aizek/aizek.onnx
 ```
 
-### Шаг 4. Проверка с микрофона
+### 5. Test with microphone
 
 ```bash
-python scripts/listen.py "output/user_models/айзек/айзек.onnx"
+python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 1 --threshold 0.6
 ```
 
-Быстрый режим (~80 ms):
+Say your phrase — you should see `>>> WAKE!`.
+
+### 6. Benchmark speed
 
 ```bash
-python scripts/listen.py "output/user_models/айзек/айзек.onnx" --trigger-frames 1 --threshold 0.6
+python scripts/benchmark_latency.py "output/user_models/aizek/aizek.onnx"
 ```
 
-### Шаг 5. Замер скорости
-
-```bash
-python scripts/benchmark_latency.py "output/user_models/айзек/айзек.onnx"
-```
+Typical results: **~2 ms** inference (p50), **~80–250 ms** end-to-end depending on settings.
 
 ---
 
-## Как это работает
+## How it works
 
 ```
-Пользователь (3–10 WAV)
+User recordings (3–10 WAV)
         │
         ▼
-   Аугментация ×80 + микс с data/negatives/
+Augmentation ×80 + mix with platform noise
         │
         ▼
-   Embeddings (openWakeWord) → positive_features.npy
+openWakeWord embeddings → positive_features.npy
         │
         ▼
-   Train маленькой DNN + shared_negatives.npy
+Train small DNN + shared_negatives.npy
         │
         ▼
-   айзек.onnx  →  CPU inference ~2 ms / 80 ms чанк
+phrase.onnx → CPU inference ~2 ms / 80 ms chunk
 ```
 
-| Роль | Что делает |
-|------|------------|
-| **Пользователь** | Записывает только свою короткую фразу |
-| **Платформа (вы)** | Собирает `data/negatives/` — часы шума и речи |
-| **Система** | Аугментирует, учит ONNX, отдаёт в ассистент |
+| Role | Responsibility |
+|------|----------------|
+| **End user** | Records only their short wake phrase |
+| **Platform (you)** | Maintains `data/negatives/` — hours of noise & speech |
+| **System** | Augments, trains, exports ONNX for the assistant |
 
-Задержка до WAKE:
+**Detection latency:**
 
 ```
 ≈ trigger_frames × 80 ms + ~3 ms inference
 ```
 
-Настройки в [config/default.yaml](config/default.yaml).
+Configure in [config/default.yaml](config/default.yaml).
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```
 custom-wake-word/
-├── config/default.yaml       # лимиты, train, inference
+├── config/default.yaml       # limits, training, inference
 ├── data/
-│   ├── negatives/            # ваш корпус шума (в git — только README)
-│   └── features/             # shared_negatives.npy (генерируется)
-├── workspace/recordings/     # WAV пользователя
-├── catalog/                  # готовые .onnx + manifest.json
-├── output/user_models/       # обученные модели
-├── scripts/
-│   ├── admin_build_negatives.py
-│   ├── train_user_phrase.py
-│   ├── validate_recordings.py
-│   ├── listen.py
-│   └── benchmark_latency.py
+│   ├── negatives/            # noise corpus (audio not in git)
+│   └── features/             # shared_negatives.npy (generated)
+├── workspace/recordings/     # user WAV files
+├── catalog/                  # pre-trained .onnx models
+├── output/user_models/       # trained models
+├── scripts/                  # CLI tools
 └── src/wakeword/             # Python SDK
-    ├── service.py            # API для ассистента
-    ├── inference.py          # WakeWordEngine
-    ├── train_pipeline.py
-    └── ...
 ```
 
 ---
 
-## CLI — все команды
+## CLI reference
 
-| Команда | Назначение |
-|---------|------------|
-| `admin_build_negatives.py` | Индексировать `data/negatives/` → `.npy` |
-| `admin_build_negatives.py --features-only` | Только embeddings (staging уже готов) |
-| `validate_recordings.py "фраза"` | Проверить 3–10 WAV |
-| `train_user_phrase.py "фраза"` | Аугментация + train + ONNX |
-| `listen.py model.onnx` | Слушать микрофон |
-| `benchmark_latency.py model.onnx` | Замер p50/p99 latency |
+| Command | Purpose |
+|---------|---------|
+| `admin_build_negatives.py` | Index `data/negatives/` → `.npy` |
+| `admin_build_negatives.py --features-only` | Embeddings only (staging ready) |
+| `validate_recordings.py "phrase"` | Check 3–10 WAV files |
+| `train_user_phrase.py "phrase"` | Augment + train + export ONNX |
+| `listen.py model.onnx` | Live microphone test |
+| `benchmark_latency.py model.onnx` | Measure p50/p99 latency |
 
 ---
 
-## Встраивание в ассистент (Python)
+## Python API
 
 ```python
 import sys
@@ -215,106 +174,80 @@ sys.path.insert(0, str(Path("path/to/custom-wake-word/src")))
 from wakeword.service import WakeWordPlatform
 from wakeword.inference import WakeWordEngine
 
-# Обучение
+# Train
 platform = WakeWordPlatform()
-result = platform.train_user_model("айзек", Path("workspace/recordings"))
+result = platform.train_user_model("aizek", Path("workspace/recordings"))
 if result.success:
     print(result.model_path)
 
-# Инференс
+# Inference
 engine = WakeWordEngine(
-    "output/user_models/айзек/айзек.onnx",
+    "output/user_models/aizek/aizek.onnx",
     threshold=0.6,
     trigger_frames=1,
 )
-score, fired = engine.process_chunk(audio_int16_16khz)
+score, triggered = engine.process_chunk(audio_int16_16khz)
 ```
 
-Каталог готовых фраз: `catalog/manifest.json` + `.onnx` в `catalog/models/`.
-
 ---
 
-## Каталог готовых фраз
+## Tuning speed vs accuracy
 
-1. Положите `.onnx` в `catalog/models/`
-2. Добавьте запись в `catalog/manifest.json`
-3. `WakeWordEngine.from_catalog("id")`
-
----
-
-## Настройка скорости и качества
-
-В `config/default.yaml`:
+In `config/default.yaml`:
 
 ```yaml
 inference:
-  frame_samples: 1280   # 80 ms — минимум openWakeWord
   threshold: 0.6
-  trigger_frames: 1     # 1=~80ms, 2=~160ms, 3=~240ms
-  refractory_sec: 2.0   # пауза между повторными WAKE
+  trigger_frames: 1   # 1 ≈ 80 ms, 2 ≈ 160 ms, 3 ≈ 240 ms
+  refractory_sec: 2.0 # cooldown between detections
 ```
 
-| `trigger_frames` | Задержка | Риск ложных |
-|------------------|----------|-------------|
-| 1 | ~80 ms | Выше |
-| 2 | ~160 ms | Средний |
-| 3 | ~240 ms | Ниже |
+| `trigger_frames` | Latency | False activations |
+|------------------|---------|-------------------|
+| 1 | ~80 ms | Higher risk |
+| 2 | ~160 ms | Balanced |
+| 3 | ~240 ms | More stable |
 
 ---
 
-## Что коммитить на GitHub
+## Requirements
 
-**Коммитить:**
-- `src/`, `scripts/`, `config/`, `README.md`, `requirements.txt`, `LICENSE`
-- `data/negatives/README.md`, пустые `.gitkeep` в папках
-- `catalog/manifest.json` (модели `.onnx` — по желанию, если маленькие)
-
-**Не коммитить** (уже в `.gitignore`):
-- `data/negatives/**/*.wav` — гигабайты датасетов
-- `data/features/*.npy`
-- `workspace/recordings/`, `output/`
-- `.venv/`
+| Component | Minimum |
+|-----------|---------|
+| Python | 3.10+ |
+| OS | Windows / Linux |
+| RAM | 8 GB (16 GB for large noise corpus) |
+| GPU | Optional (speeds up feature extraction) |
+| Microphone | For `listen.py` |
 
 ---
 
-## Источники данных для `data/negatives/`
+## Free datasets for `data/negatives/`
 
-Примеры бесплатных речевых датасетов:
-
-- [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset) — RU, EN, DE, PL, UK…
+- [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset) — speech in many languages
 - [Mozilla Common Voice](https://github.com/common-voice/cv-dataset)
 
-Шум: UrbanSound, ESC-50, свои записи с микрофона.
+For noise: UrbanSound8K, ESC-50, or record your own environment.
 
 ---
 
-## Ограничения
+## What gets committed to git
 
-- Embeddings openWakeWord лучше работают на **английском**; для **русского** нужен большой корпус негативов и 7–10 записей
-- Качество на уровне Porcupine требует тестов **8+ часов** фона (FAR)
-- `admin_build_negatives` на ~100k файлов может занять **часы**
+**Included:** code, docs, config, `LICENSE`
 
----
-
-## Публикация на GitHub
-
-Пошагово: **[GITHUB.md](GITHUB.md)** (переименование папки, push, разные имена локально и на GitHub).
-
-Кратко:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: custom wake word platform"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/phrase-wake.git
-git push -u origin main
-```
+**Excluded** (via `.gitignore`): `data/negatives/*.wav`, `*.npy`, recordings, trained models, `.venv`
 
 ---
 
-## Лицензия
+## Limitations
 
-MIT — см. [LICENSE](LICENSE).
+- openWakeWord embeddings work best on **English**; other languages need more recordings and a larger noise corpus
+- Porcupine-level false-alarm rates require **8+ hours** of background testing
+- Large noise indexing can take **hours**
 
-Использует [openWakeWord](https://github.com/dscripka/openWakeWord) (Apache 2.0) для embeddings и inference.
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).  
+Uses [openWakeWord](https://github.com/dscripka/openWakeWord) (Apache 2.0) for embeddings and inference.

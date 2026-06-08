@@ -6,13 +6,13 @@ __pycache__/
 venv/
 .env
 
-# IDE / локальное
+# IDE / local
 .vscode/
 .idea/
 .specstory/
 *.log
 
-# Данные (не коммитить — слишком большие)
+# Data (do not commit — too large)
 data/negatives/**/*
 !data/negatives/README.md
 !data/negatives/**/.gitkeep
@@ -20,14 +20,14 @@ data/negatives/**/*
 data/features/*.npy
 data/features/_staging_neg_wav/
 
-# Пользовательские записи и артефакты обучения
+# User recordings and training artifacts
 workspace/**/*
 !workspace/recordings/.gitkeep
 
 output/**/*
 !output/.gitkeep
 
-# Веса (ONNX в catalog можно коммитить вручную, если маленькие)
+# Weights (small ONNX files in catalog/ can be committed manually)
 *.pt
 
 # OS

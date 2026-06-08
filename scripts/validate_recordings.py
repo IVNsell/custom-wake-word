@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка папки с записями перед обучением."""
+"""Validate user recordings folder before training."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def main():
     for e in v.errors:
         print("ERROR:", e)
     if v.ok:
-        print(f"OK: {len(v.files)} файлов")
+        print(f"OK: {len(v.files)} files")
         sys.exit(0)
     sys.exit(1)
 

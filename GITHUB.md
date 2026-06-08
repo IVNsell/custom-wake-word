@@ -1,62 +1,62 @@
-# Публикация на GitHub: имена папок
+# Publishing to GitHub: folder names
 
-## Главное
+## Key point
 
-**Локальная папка** и **имя репозитория на GitHub** — это разные вещи. Они **не обязаны совпадать**.
+Your **local folder name** and the **GitHub repository name** are different things. They **do not have to match**.
 
-| Где | Пример имени | Что это |
-|-----|----------------|---------|
-| У вас на диске | `custom-wake-word` | Просто папка с файлами |
-| На GitHub | `phrase-wake` или `open-wakeword-trainer` | Имя репозитория в URL |
-| После `git clone` | как назвали репо | У другого человека своя папка |
+| Location | Example name | What it is |
+|----------|--------------|------------|
+| On your disk | `custom-wake-word` | Just a folder with files |
+| On GitHub | `phrase-wake` or `open-wakeword-trainer` | Repository name in the URL |
+| After `git clone` | whatever you named the repo | Each user has their own folder name |
 
-Пример:
+Example:
 
 ```text
-Диск:     C:\Projects\custom-wake-word\
+Disk:     C:\Projects\custom-wake-word\
 GitHub:   github.com/ivan/phrase-wake
 Clone:    git clone https://github.com/ivan/phrase-wake.git
-          → папка phrase-wake/  (не custom-wake-word — и это нормально)
+          → folder phrase-wake/  (not custom-wake-word — that's fine)
 ```
 
-Код внутри один и тот же. Имя папки на GitHub **не влияет** на работу программы.
+The code inside is the same. The GitHub folder name **does not affect** how the program runs.
 
 ---
 
-## Шаг 1. Переименовать локальную папку (рекомендуется)
+## Step 1. Rename the local folder (recommended)
 
-Сейчас: `test_wake_up` → лучше: **`custom-wake-word`**
+Current: `test_wake_up` → better: **`custom-wake-word`**
 
-1. **Закройте Cursor** (папка занята, пока IDE открыт).
-2. В проводнике или PowerShell:
+1. **Close Cursor** (the folder is locked while the IDE is open).
+2. In File Explorer or PowerShell:
 
 ```powershell
 Rename-Item "C:\Users\IVNse\IVN\IVNsell\test_wake_up" "custom-wake-word"
 ```
 
-3. Откройте проект снова из `custom-wake-word`.
+3. Reopen the project from `custom-wake-word`.
 
-Другие варианты имени локальной папки:
+Other local folder name options:
 
-- `custom-wake-word` — универсально
-- `phrase-wake` — короче
-- `wake-word-sdk` — если акцент на SDK
+- `custom-wake-word` — general purpose
+- `phrase-wake` — shorter
+- `wake-word-sdk` — if you emphasize the SDK
 
 ---
 
-## Шаг 2. Создать репозиторий на GitHub
+## Step 2. Create a GitHub repository
 
 1. [github.com/new](https://github.com/new)
-2. **Repository name** — любое, например:
+2. **Repository name** — anything you like, for example:
    - `custom-wake-word`
    - `phrase-wake`
    - `open-wakeword-trainer`
-3. Public, **без** README (у вас уже есть).
+3. Public, **without** README (you already have one).
 4. Create repository.
 
 ---
 
-## Шаг 3. Залить код
+## Step 3. Push the code
 
 ```powershell
 cd C:\Users\IVNse\IVN\IVNsell\custom-wake-word
@@ -66,32 +66,32 @@ git add .
 git status
 git commit -m "Initial commit: custom wake word platform"
 git branch -M main
-git remote add origin https://github.com/ВАШ_ЛОГИН/phrase-wake.git
+git remote add origin https://github.com/YOUR_USERNAME/custom-wake-word.git
 git push -u origin main
 ```
 
-`phrase-wake` в URL — имя **репозитория на GitHub**.  
-Локальная папка может называться `custom-wake-word` — **это нормально**.
+`custom-wake-word` in the URL is the **GitHub repository name**.  
+Your local folder can still be named `custom-wake-word` — **that's fine**.
 
 ---
 
-## Что не попадёт на GitHub
+## What does not go to GitHub
 
-См. `.gitignore`:
+See `.gitignore`:
 
-- `data/negatives/*.wav` (гигабайты датасетов)
+- `data/negatives/*.wav` (gigabytes of datasets)
 - `data/features/*.npy`
 - `workspace/recordings/`, `output/`
 - `.venv/`
 
-На GitHub только **код и документация**.
+Only **code and documentation** go to GitHub.
 
 ---
 
-## Описание репозитория (About)
+## Repository description (About)
 
 **Description:**
 
-> Open-source wake word на Python: своя фраза из 3–10 записей, ONNX inference ~2 ms, обучение локально.
+> Open-source wake word in Python: train your own phrase from 3–10 recordings, ONNX inference ~2 ms, train locally.
 
 **Topics:** `wake-word`, `openwakeword`, `onnx`, `speech`, `voice-assistant`, `python`

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Замер скорости wake word: inference на чанк и оценка end-to-end задержки."""
+"""Measure wake word inference latency and estimate end-to-end delay."""
 
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ def print_stats(label: str, times_ms: list[float]) -> None:
 
 def main():
     p = argparse.ArgumentParser(description="Benchmark wake word latency")
-    p.add_argument("model", type=Path, help="Путь к .onnx")
-    p.add_argument("--runs", type=int, default=2000, help="Число замеров inference")
+    p.add_argument("model", type=Path, help="Path to .onnx model")
+    p.add_argument("--runs", type=int, default=2000, help="Number of inference runs")
     p.add_argument("--warmup", type=int, default=50)
     p.add_argument("--threshold", type=float, default=None)
     p.add_argument("--trigger-frames", type=int, default=None)
@@ -79,25 +79,23 @@ def main():
         refractory_sec=inf["refractory_sec"],
     )
 
-    print(f"Модель: {args.model}")
-    print(f"Чанк: {chunk} samples ({frame_ms:.1f} ms @ {sr} Hz)")
-    print(f"trigger_frames: {trigger_frames} (нужно подряд для WAKE)")
+    print(f"Model: {args.model}")
+    print(f"Chunk: {chunk} samples ({frame_ms:.1f} ms @ {sr} Hz)")
+    print(f"trigger_frames: {trigger_frames} (consecutive frames required for WAKE)")
 
     times = benchmark_raw_inference(engine, chunk, args.runs, args.warmup)
-    print_stats("Inference (1 чанк, CPU ONNX)", times)
+    print_stats("Inference (1 chunk, CPU ONNX)", times)
 
     p50 = _percentile(sorted(times), 50)
-    # Минимальная end-to-end: N фреймов аудио + N раз inference
     e2e_min_ms = trigger_frames * frame_ms + trigger_frames * p50
     e2e_typical_ms = trigger_frames * frame_ms + trigger_frames * _percentile(sorted(times), 95)
 
-    print("\nОценка end-to-end (от начала фразы до события WAKE):")
-    print(f"  аудио-буфер: {trigger_frames} x {frame_ms:.1f} ms = {trigger_frames * frame_ms:.1f} ms")
-    print(f"  + inference: {trigger_frames} x p50/p95")
-    print(f"  => оптимистично ~{e2e_min_ms:.0f} ms")
-    print(f"  => типично     ~{e2e_typical_ms:.0f} ms")
-    print("\nПримечание: реальная задержка зависит от того, попали ли вы в границу чанка.")
-    print("Porcupine обычно ~десятки ms на inference; сравнивайте p50/p99 выше.")
+    print("\nEnd-to-end estimate (phrase start → WAKE event):")
+    print(f"  audio buffer: {trigger_frames} x {frame_ms:.1f} ms = {trigger_frames * frame_ms:.1f} ms")
+    print(f"  + inference:  {trigger_frames} x p50/p95")
+    print(f"  => optimistic ~{e2e_min_ms:.0f} ms")
+    print(f"  => typical     ~{e2e_typical_ms:.0f} ms")
+    print("\nNote: actual delay depends on chunk alignment when you start speaking.")
 
 
 if __name__ == "__main__":

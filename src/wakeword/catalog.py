@@ -1,3 +1,5 @@
+"""Load pre-trained wake word models from catalog/manifest.json."""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +9,7 @@ from .config import ROOT
 
 
 def load_catalog(manifest_path: Path | None = None) -> list[dict]:
+    """Return catalog entries whose .onnx files exist on disk."""
     path = manifest_path or (ROOT / "catalog" / "manifest.json")
     if not path.exists():
         return []
@@ -25,7 +28,7 @@ def load_catalog(manifest_path: Path | None = None) -> list[dict]:
 
 
 def list_catalog_for_api() -> list[dict]:
-    """Метаданные для UI ассистента (без путей к отсутствующим файлам)."""
+    """Catalog metadata for UI (includes availability without file paths)."""
     path = ROOT / "catalog" / "manifest.json"
     if not path.exists():
         return []

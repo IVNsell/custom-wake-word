@@ -1,3 +1,5 @@
+"""Real-time wake word inference via openWakeWord ONNX runtime."""
+
 from __future__ import annotations
 
 import time
@@ -7,7 +9,8 @@ from pathlib import Path
 
 class WakeWordEngine:
     """
-    Инференс для ассистента: ONNX через openWakeWord (быстрый CPU-путь).
+    Lightweight inference wrapper for voice assistants.
+    Uses openWakeWord Model with ONNX on CPU (~2 ms per 80 ms chunk).
     """
 
     def __init__(
@@ -25,6 +28,7 @@ class WakeWordEngine:
         self.threshold = threshold
         self.trigger_frames = trigger_frames
         self.refractory_sec = refractory_sec
+        # Rolling window of recent scores for debounced triggering
         self._scores: deque[float] = deque(maxlen=trigger_frames)
         self._last_trigger = 0.0
 
@@ -36,8 +40,13 @@ class WakeWordEngine:
 
     def process_chunk(self, audio_int16) -> tuple[float, bool]:
         """
-        audio_int16: numpy int16, 16 kHz, длина кратна 1280 (или как у openWakeWord).
-        Возвращает (score, triggered).
+        Process one audio chunk.
+
+        Args:
+            audio_int16: numpy int16, 16 kHz, typically 1280 samples (~80 ms).
+
+        Returns:
+            (score, triggered) — triggered is True when wake word detected.
         """
         import numpy as np
 
@@ -49,6 +58,7 @@ class WakeWordEngine:
         self._scores.append(score)
 
         now = time.monotonic()
+        # Refractory period prevents duplicate triggers for the same utterance
         if now - self._last_trigger < self.refractory_sec:
             return score, False
 
@@ -61,6 +71,7 @@ class WakeWordEngine:
 
     @classmethod
     def from_catalog(cls, model_id: str, catalog_manifest: Path | None = None):
+        """Load a pre-trained model from catalog/manifest.json."""
         import json
 
         from .config import ROOT
@@ -69,6 +80,6 @@ class WakeWordEngine:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         entry = next((m for m in data["models"] if m["id"] == model_id), None)
         if not entry:
-            raise KeyError(f"Модель {model_id} не в каталоге")
+            raise KeyError(f"Model {model_id} not found in catalog")
         path = ROOT / "catalog" / "models" / entry["file"]
         return cls(path, threshold=entry.get("threshold", 0.5))

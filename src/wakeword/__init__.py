@@ -1,4 +1,4 @@
-"""Wake word SDK для ассистента: 3–10 записей пользователя + общий корпус шума."""
+"""Wake word SDK: 3-10 user recordings + shared platform noise corpus."""
 
 from .config import load_config
 from .inference import WakeWordEngine

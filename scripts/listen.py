@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка wake word с микрофона."""
+"""Live microphone test for a trained wake word model."""
 
 from __future__ import annotations
 
@@ -18,9 +18,14 @@ from wakeword.inference import WakeWordEngine
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("model", type=Path, help="Путь к .onnx")
+    p.add_argument("model", type=Path, help="Path to .onnx model")
     p.add_argument("--threshold", type=float, default=None)
-    p.add_argument("--trigger-frames", type=int, default=None, help="Фреймов подряд для WAKE (1=быстро, 3=стабильно)")
+    p.add_argument(
+        "--trigger-frames",
+        type=int,
+        default=None,
+        help="Consecutive frames above threshold to trigger (1=fast, 3=stable)",
+    )
     args = p.parse_args()
 
     cfg = load_config()
@@ -37,12 +42,15 @@ def main():
     frame_ms = chunk / sr * 1000
     est_ms = engine.trigger_frames * frame_ms
 
-    print(f"Слушаю… порог {engine.threshold}, trigger_frames={engine.trigger_frames} (~{est_ms:.0f} ms до WAKE). Ctrl+C — выход.")
+    print(
+        f"Listening… threshold={engine.threshold}, "
+        f"trigger_frames={engine.trigger_frames} (~{est_ms:.0f} ms to WAKE). Ctrl+C to exit."
+    )
 
     try:
         import sounddevice as sd
     except ImportError:
-        print("pip install sounddevice")
+        print("Install: pip install sounddevice")
         sys.exit(1)
 
     def callback(indata, _frames, _time, status):
@@ -60,7 +68,7 @@ def main():
             while True:
                 sd.sleep(1000)
     except KeyboardInterrupt:
-        print("\nВыход.")
+        print("\nExit.")
         sys.exit(0)
 
 
@@ -68,5 +76,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nВыход.")
+        print("\nExit.")
         sys.exit(0)

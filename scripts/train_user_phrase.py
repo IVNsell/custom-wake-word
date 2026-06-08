@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Обучение персональной фразы из 3–10 записей пользователя."""
+"""Train a personal wake phrase from 3-10 user recordings."""
 
 from __future__ import annotations
 
@@ -15,19 +15,19 @@ from wakeword.train_pipeline import train_user_phrase
 
 
 def main():
-    p = argparse.ArgumentParser(description="Train personal wake word (3–10 recordings)")
-    p.add_argument("phrase", help='Фраза, напр. "эй максим"')
+    p = argparse.ArgumentParser(description="Train personal wake word (3-10 recordings)")
+    p.add_argument("phrase", help='Wake phrase, e.g. "aizek" or "hey nova"')
     p.add_argument(
         "--recordings",
         type=Path,
         default=None,
-        help="Папка с WAV (по умолчанию workspace/recordings)",
+        help="Recordings folder (default: workspace/recordings)",
     )
     p.add_argument("--config", type=Path, default=None)
     p.add_argument(
         "--prepare-only",
         action="store_true",
-        help="Только аугментация + features, без openWakeWord train",
+        help="Only augment + extract features, skip training",
     )
     args = p.parse_args()
 
@@ -35,9 +35,9 @@ def main():
     rec_dir = args.recordings or resolve_path(cfg, "user_recordings")
     rec_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Фраза: {args.phrase}")
-    print(f"Записи: {rec_dir}")
-    print(f"Негативы (шум): {resolve_path(cfg, 'negatives_root')}")
+    print(f"Phrase: {args.phrase}")
+    print(f"Recordings: {rec_dir}")
+    print(f"Noise corpus: {resolve_path(cfg, 'negatives_root')}")
 
     onnx = train_user_phrase(
         args.phrase,
@@ -45,7 +45,7 @@ def main():
         cfg,
         skip_oww_train=args.prepare_only,
     )
-    print(f"\nГотово: {onnx}")
+    print(f"\nDone: {onnx}")
 
 
 if __name__ == "__main__":
