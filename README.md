@@ -1,253 +1,139 @@
-# Custom Wake Word
+# custom-wake-word
 
-Train your own **short wake phrase** (like Porcupine) with **3–10 voice recordings**, run inference on **CPU via ONNX** (~2 ms per chunk), fully **offline**.
+Train a custom wake phrase from a handful of recordings and run detection on CPU with ONNX.
 
-Built for voice assistants: users record a custom trigger word; you maintain a shared noise corpus once; everyone gets a personal `.onnx` model.
+I wanted something like Porcupine but without a paid API — record your phrase a few times, train locally, ship a small `.onnx` file. Uses [openWakeWord](https://github.com/dscripka/openWakeWord) for embeddings; the rest is augmentation + a tiny DNN on top.
 
----
+Works offline. Tested on Windows with an RTX GPU for training; inference is CPU-only.
 
-## What is this?
-
-A Python toolkit that lets you:
-
-1. **Record** a short phrase 3–10 times (e.g. "hey nova", "aizek")
-2. **Train** a tiny wake-word model locally (~6–10 min)
-3. **Run** always-on detection from the microphone (~80–250 ms latency)
-
-No cloud. No subscription. Open source.
-
----
-
-## Quick start
-
-### 1. Install
+## Install
 
 ```bash
 git clone https://github.com/IVNsell/custom-wake-word.git
 cd custom-wake-word
-
 python -m venv .venv
 
 # Windows
 .\.venv\Scripts\activate
-
 # Linux / macOS
 source .venv/bin/activate
 
 pip install -r requirements.txt
-pip install sounddevice   # microphone test only
+pip install sounddevice   # only for listen.py
 ```
 
-### 2. Build the noise corpus (admin, once)
+## Usage
 
-Drop background audio into `data/negatives/` — see [data/negatives/README.md](data/negatives/README.md).
+**1. Noise corpus (do once)**
+
+Put background audio under `data/negatives/` — rain, traffic, speech, music, whatever you have. Details in [data/negatives/README.md](data/negatives/README.md).
 
 ```bash
 python scripts/admin_build_negatives.py
 ```
 
-This can take **hours** with a large corpus. If preparation finished but features failed:
+Writes `data/features/shared_negatives.npy`. On a big corpus this takes a while. If wav prep already finished:
 
 ```bash
 python scripts/admin_build_negatives.py --features-only
 ```
 
-Output: `data/features/shared_negatives.npy`
+**2. Record your phrase**
 
-### 3. Record your wake phrase
-
-Put **3–10** WAV files in `workspace/recordings/`:
-
-| Rule | Value |
-|------|-------|
-| Clips | 3–10 files |
-| Duration | 0.6–2.5 seconds each |
-| Content | **Only** the wake phrase, no background noise |
-| Format | WAV, 16 kHz mono preferred |
+Drop 3–10 WAV files into `workspace/recordings/`. Each clip should be just the wake word, ~0.6–2.5 s, quiet room. 16 kHz mono is ideal; stereo 48 kHz also works.
 
 ```bash
 python scripts/validate_recordings.py "aizek"
 ```
 
-### 4. Train
+**3. Train**
 
 ```bash
 python scripts/train_user_phrase.py "aizek"
 ```
 
-Model output:
+Output: `output/user_models/aizek/aizek.onnx`
 
-```
-output/user_models/aizek/aizek.onnx
-```
-
-### 5. Test with microphone
+**4. Listen**
 
 ```bash
 python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 1 --threshold 0.6
 ```
 
-Say your phrase — you should see `>>> WAKE!`.
-
-### 6. Benchmark speed
+**5. Benchmark** (optional)
 
 ```bash
 python scripts/benchmark_latency.py "output/user_models/aizek/aizek.onnx"
 ```
 
-Typical results: **~2 ms** inference (p50), **~80–250 ms** end-to-end depending on settings.
+On my machine inference is ~2 ms per chunk; end-to-end trigger is roughly 80–250 ms depending on `trigger_frames`.
 
----
+## Pipeline
 
-## How it works
+Recordings → augment (~×80) + mix with negatives → openWakeWord features → train DNN against `shared_negatives.npy` → export ONNX.
 
-```
-User recordings (3–10 WAV)
-        │
-        ▼
-Augmentation ×80 + mix with platform noise
-        │
-        ▼
-openWakeWord embeddings → positive_features.npy
-        │
-        ▼
-Train small DNN + shared_negatives.npy
-        │
-        ▼
-phrase.onnx → CPU inference ~2 ms / 80 ms chunk
-```
+Users only record their phrase. Whoever runs the platform maintains `data/negatives/` once and reuses it for every model.
 
-| Role | Responsibility |
-|------|----------------|
-| **End user** | Records only their short wake phrase |
-| **Platform (you)** | Maintains `data/negatives/` — hours of noise & speech |
-| **System** | Augments, trains, exports ONNX for the assistant |
-
-**Detection latency:**
+## Layout
 
 ```
-≈ trigger_frames × 80 ms + ~3 ms inference
+config/default.yaml
+data/negatives/          # your noise files (not in git)
+data/features/           # shared_negatives.npy
+workspace/recordings/    # user wavs
+output/user_models/      # trained models
+catalog/                 # optional pre-trained onnx
+scripts/                 # cli
+src/wakeword/            # library
 ```
 
-Configure in [config/default.yaml](config/default.yaml).
+## Scripts
 
----
+- `admin_build_negatives.py` — build negative feature bank
+- `validate_recordings.py "phrase"` — check recordings before train
+- `train_user_phrase.py "phrase"` — full train pipeline
+- `listen.py model.onnx` — mic test
+- `benchmark_latency.py model.onnx` — timing
 
-## Project structure
-
-```
-custom-wake-word/
-├── config/default.yaml       # limits, training, inference
-├── data/
-│   ├── negatives/            # noise corpus (audio not in git)
-│   └── features/             # shared_negatives.npy (generated)
-├── workspace/recordings/     # user WAV files
-├── catalog/                  # pre-trained .onnx models
-├── output/user_models/       # trained models
-├── scripts/                  # CLI tools
-└── src/wakeword/             # Python SDK
-```
-
----
-
-## CLI reference
-
-| Command | Purpose |
-|---------|---------|
-| `admin_build_negatives.py` | Index `data/negatives/` → `.npy` |
-| `admin_build_negatives.py --features-only` | Embeddings only (staging ready) |
-| `validate_recordings.py "phrase"` | Check 3–10 WAV files |
-| `train_user_phrase.py "phrase"` | Augment + train + export ONNX |
-| `listen.py model.onnx` | Live microphone test |
-| `benchmark_latency.py model.onnx` | Measure p50/p99 latency |
-
----
-
-## Python API
+## Python
 
 ```python
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path("path/to/custom-wake-word/src")))
+sys.path.insert(0, "src")
 
 from wakeword.service import WakeWordPlatform
 from wakeword.inference import WakeWordEngine
 
-# Train
 platform = WakeWordPlatform()
 result = platform.train_user_model("aizek", Path("workspace/recordings"))
-if result.success:
-    print(result.model_path)
 
-# Inference
-engine = WakeWordEngine(
-    "output/user_models/aizek/aizek.onnx",
-    threshold=0.6,
-    trigger_frames=1,
-)
-score, triggered = engine.process_chunk(audio_int16_16khz)
+engine = WakeWordEngine("output/user_models/aizek/aizek.onnx", threshold=0.6, trigger_frames=1)
+score, fired = engine.process_chunk(audio_int16_16khz)
 ```
 
----
+## Inference tuning
 
-## Tuning speed vs accuracy
-
-In `config/default.yaml`:
+`config/default.yaml`:
 
 ```yaml
 inference:
   threshold: 0.6
-  trigger_frames: 1   # 1 ≈ 80 ms, 2 ≈ 160 ms, 3 ≈ 240 ms
-  refractory_sec: 2.0 # cooldown between detections
+  trigger_frames: 1   # 1 = fast (~80ms), 3 = fewer false triggers
+  refractory_sec: 2.0
 ```
 
-| `trigger_frames` | Latency | False activations |
-|------------------|---------|-------------------|
-| 1 | ~80 ms | Higher risk |
-| 2 | ~160 ms | Balanced |
-| 3 | ~240 ms | More stable |
+Latency is roughly `trigger_frames × 80ms` of audio buffering plus a few ms of ONNX.
 
----
+## Notes
 
-## Requirements
+- Non-English phrases work but need more recordings and a decent negative set.
+- Building negatives from hundreds of thousands of files can take hours.
+- Large audio (`data/negatives/`, `*.npy`, recordings, models) is gitignored — clone is just code + config.
 
-| Component | Minimum |
-|-----------|---------|
-| Python | 3.10+ |
-| OS | Windows / Linux |
-| RAM | 8 GB (16 GB for large noise corpus) |
-| GPU | Optional (speeds up feature extraction) |
-| Microphone | For `listen.py` |
-
----
-
-## Free datasets for `data/negatives/`
-
-- [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset) — speech in many languages
-- [Mozilla Common Voice](https://github.com/common-voice/cv-dataset)
-
-For noise: UrbanSound8K, ESC-50, or record your own environment.
-
----
-
-## What gets committed to git
-
-**Included:** code, docs, config, `LICENSE`
-
-**Excluded** (via `.gitignore`): `data/negatives/*.wav`, `*.npy`, recordings, trained models, `.venv`
-
----
-
-## Limitations
-
-- openWakeWord embeddings work best on **English**; other languages need more recordings and a larger noise corpus
-- Porcupine-level false-alarm rates require **8+ hours** of background testing
-- Large noise indexing can take **hours**
-
----
+Good free speech sources for negatives: [M-AILABS](https://github.com/i-celeste-aurora/m-ailabs-dataset), [Common Voice](https://github.com/common-voice/cv-dataset).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).  
-Uses [openWakeWord](https://github.com/dscripka/openWakeWord) (Apache 2.0) for embeddings and inference.
+MIT — see [LICENSE](LICENSE). openWakeWord is Apache 2.0.
