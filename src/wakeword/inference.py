@@ -6,6 +6,8 @@ import time
 from collections import deque
 from pathlib import Path
 
+import numpy as np
+
 
 class WakeWordEngine:
     """
@@ -21,6 +23,8 @@ class WakeWordEngine:
         trigger_frames: int = 3,
         refractory_sec: float = 2.0,
         inference_framework: str = "onnx",
+        verifier=None,
+        verifier_window_sec: float = 2.5,
     ):
         from openwakeword.model import Model
 
@@ -28,9 +32,12 @@ class WakeWordEngine:
         self.threshold = threshold
         self.trigger_frames = trigger_frames
         self.refractory_sec = refractory_sec
+        self.verifier = verifier
+        self.last_verification = None
         # Rolling window of recent scores for debounced triggering
         self._scores: deque[float] = deque(maxlen=trigger_frames)
         self._last_trigger = 0.0
+        self._audio_buffer: deque[int] = deque(maxlen=int(16000 * verifier_window_sec))
 
         self._oww = Model(
             wakeword_models=[str(self.model_path)],
@@ -48,10 +55,10 @@ class WakeWordEngine:
         Returns:
             (score, triggered) — triggered is True when wake word detected.
         """
-        import numpy as np
-
         if not isinstance(audio_int16, np.ndarray):
             audio_int16 = np.asarray(audio_int16, dtype=np.int16)
+        audio_int16 = audio_int16.astype(np.int16, copy=False)
+        self._audio_buffer.extend(audio_int16.tolist())
 
         pred = self._oww.predict(audio_int16)
         score = float(pred.get(self._model_key, 0.0))
@@ -63,6 +70,13 @@ class WakeWordEngine:
             return score, False
 
         if len(self._scores) == self.trigger_frames and all(s >= self.threshold for s in self._scores):
+            if self.verifier is not None:
+                candidate = np.asarray(self._audio_buffer, dtype=np.int16)
+                self.last_verification = self.verifier.verify(candidate)
+                self._scores.clear()
+                if not self.last_verification.accepted:
+                    return score, False
+
             self._last_trigger = now
             self._scores.clear()
             return score, True

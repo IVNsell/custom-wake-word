@@ -1,10 +1,13 @@
 # custom-wake-word
 
-Train a custom wake phrase from a handful of recordings and run detection on CPU with ONNX.
+Train a custom wake phrase from a handful of recordings and run offline detection on CPU.
 
-I wanted something like Porcupine but without a paid API — record your phrase a few times, train locally, ship a small `.onnx` file. Uses [openWakeWord](https://github.com/dscripka/openWakeWord) for embeddings; the rest is augmentation + a tiny DNN on top.
+The detector uses two stages:
 
-Works offline. Tested on Windows with an RTX GPU for training; inference is CPU-only.
+1. **Wake model** — openWakeWord embeddings + a small ONNX model for fast candidate detection.
+2. **Phonetic verifier** — MFCC + DTW comparison against the user's own recordings to reject similar short words.
+
+This helps with cases where the neural wake model thinks two short words are close, for example `aizek` vs `alex`.
 
 ## Install
 
@@ -24,7 +27,15 @@ pip install sounddevice   # only for listen.py
 
 ## Usage
 
-**1. Noise corpus (do once)**
+| Step | Command | Result |
+|------|---------|--------|
+| Record | Put 3–10 WAV files in `workspace/recordings/` | User reference phrase |
+| Validate | `python scripts/validate_recordings.py "aizek"` | Checks count, duration, format |
+| Train | `python scripts/train_user_phrase.py "aizek"` | `output/user_models/aizek/aizek.onnx` |
+| Offline test | `python scripts/test_verifier.py "output/user_models/aizek/aizek.onnx"` | Shows accepted/rejected WAVs |
+| Live use | `python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 2 --threshold 0.9 --verify-recordings "workspace/recordings"` | Microphone wake detection |
+
+### 1. Noise corpus (do once)
 
 Put background audio under `data/negatives/` — rain, traffic, speech, music, whatever you have. Details in [data/negatives/README.md](data/negatives/README.md).
 
@@ -38,7 +49,7 @@ Writes `data/features/shared_negatives.npy`. On a big corpus this takes a while.
 python scripts/admin_build_negatives.py --features-only
 ```
 
-**2. Record your phrase**
+### 2. Record your phrase
 
 Drop WAV files into `workspace/recordings/`:
 
@@ -53,7 +64,7 @@ Drop WAV files into `workspace/recordings/`:
 python scripts/validate_recordings.py "aizek"
 ```
 
-**3. Train**
+### 3. Train
 
 ```bash
 python scripts/train_user_phrase.py "aizek"
@@ -61,35 +72,63 @@ python scripts/train_user_phrase.py "aizek"
 
 Output: `output/user_models/aizek/aizek.onnx`
 
-**4. Listen**
+Optional: put similar non-wake words in `workspace/hard_negatives/` and train with:
 
 ```bash
-python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 1 --threshold 0.6
+python scripts/train_user_phrase.py "aizek" --hard-negatives workspace/hard_negatives
 ```
 
-**5. Benchmark** (optional)
+Hard negatives are not required. They are only useful when you want extra separation from known confusing words.
+
+### 4. Test offline
+
+```bash
+python scripts/test_verifier.py "output/user_models/aizek/aizek.onnx" --positives "workspace/recordings"
+```
+
+If you have test negatives (for example similar words that should not wake):
+
+```bash
+python scripts/test_verifier.py "output/user_models/aizek/aizek.onnx" --positives "workspace/recordings" --test-negatives "workspace/hard_negatives"
+```
+
+### 5. Listen
+
+```bash
+python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 2 --threshold 0.9 --verify-recordings "workspace/recordings"
+```
+
+The verifier is positive-only by default. Optional anti-references:
+
+```bash
+python scripts/listen.py "output/user_models/aizek/aizek.onnx" --trigger-frames 2 --threshold 0.9 --verify-recordings "workspace/recordings" --verify-negatives "workspace/hard_negatives"
+```
+
+### 6. Benchmark
 
 ```bash
 python scripts/benchmark_latency.py "output/user_models/aizek/aizek.onnx"
 ```
 
-On my machine inference is ~2 ms per chunk; end-to-end trigger is roughly 80–250 ms depending on `trigger_frames`.
-
 ## Pipeline
 
 ```
 recordings (3–10 wav)
-    → augment (~×80) + mix with negatives
-    → openWakeWord embeddings
-    → train DNN on shared_negatives.npy
+    → augmentation + noise mixing
+    → streaming-compatible openWakeWord features
+    → DNN training against shared negatives
     → phrase.onnx
+    → live wake score
+    → MFCC/DTW phonetic verification
+    → WAKE / reject
 ```
 
 | who | does what |
 |-----|-----------|
 | user | records their wake phrase |
 | platform | keeps `data/negatives/` (noise + speech corpus) |
-| scripts | augment, train, export onnx |
+| wake model | quickly finds candidate wake events |
+| verifier | checks phrase shape against user recordings |
 
 ## Layout
 
@@ -98,6 +137,7 @@ config/default.yaml
 data/negatives/          # your noise files (not in git)
 data/features/           # shared_negatives.npy
 workspace/recordings/    # user wavs
+workspace/hard_negatives/ # optional confusing words for testing/training
 output/user_models/      # trained models
 catalog/                 # optional pre-trained onnx
 scripts/                 # cli
@@ -112,7 +152,8 @@ src/wakeword/            # library
 | `admin_build_negatives.py --features-only` | embeddings only (wav prep already done) |
 | `validate_recordings.py "phrase"` | check recordings before train |
 | `train_user_phrase.py "phrase"` | augment + train + export onnx |
-| `listen.py model.onnx` | live mic test |
+| `test_verifier.py model.onnx` | offline positive/negative test |
+| `listen.py model.onnx` | live mic test with optional verifier |
 | `benchmark_latency.py model.onnx` | p50/p95 latency |
 
 ## Python
@@ -125,11 +166,18 @@ sys.path.insert(0, "src")
 
 from wakeword.service import WakeWordPlatform
 from wakeword.inference import WakeWordEngine
+from wakeword.verifier import PhraseVerifier
 
 platform = WakeWordPlatform()
 result = platform.train_user_model("aizek", Path("workspace/recordings"))
 
-engine = WakeWordEngine("output/user_models/aizek/aizek.onnx", threshold=0.6, trigger_frames=1)
+verifier = PhraseVerifier("workspace/recordings")
+engine = WakeWordEngine(
+    "output/user_models/aizek/aizek.onnx",
+    threshold=0.9,
+    trigger_frames=2,
+    verifier=verifier,
+)
 score, fired = engine.process_chunk(audio_int16_16khz)
 ```
 
@@ -139,8 +187,8 @@ score, fired = engine.process_chunk(audio_int16_16khz)
 
 ```yaml
 inference:
-  threshold: 0.6
-  trigger_frames: 1   # 1 = fast (~80ms), 3 = fewer false triggers
+  threshold: 0.9
+  trigger_frames: 2   # 1 = fast (~80ms), 3 = fewer false triggers
   refractory_sec: 2.0
 ```
 
@@ -151,6 +199,8 @@ inference:
 | 3 | ~240 ms | fewer |
 
 Rough formula: `trigger_frames × 80ms` audio buffer + a few ms onnx.
+
+The phonetic verifier runs only after the wake model finds a candidate, so it adds a small cost only near possible wake events.
 
 ## Requirements
 

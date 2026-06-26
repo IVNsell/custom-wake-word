@@ -25,6 +25,12 @@ def main():
     )
     p.add_argument("--config", type=Path, default=None)
     p.add_argument(
+        "--hard-negatives",
+        type=Path,
+        default=None,
+        help="Folder with similar non-wake words, e.g. alex/hello/test",
+    )
+    p.add_argument(
         "--prepare-only",
         action="store_true",
         help="Only augment + extract features, skip training",
@@ -38,11 +44,15 @@ def main():
     print(f"Phrase: {args.phrase}")
     print(f"Recordings: {rec_dir}")
     print(f"Noise corpus: {resolve_path(cfg, 'negatives_root')}")
+    hard_negatives = args.hard_negatives or resolve_path(cfg, "hard_negatives")
+    if hard_negatives.exists():
+        print(f"Hard negatives: {hard_negatives}")
 
     onnx = train_user_phrase(
         args.phrase,
         rec_dir,
         cfg,
+        hard_negatives_dir=hard_negatives if hard_negatives.exists() else None,
         skip_oww_train=args.prepare_only,
     )
     print(f"\nDone: {onnx}")

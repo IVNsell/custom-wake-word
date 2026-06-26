@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from wakeword.config import load_config
 from wakeword.inference import WakeWordEngine
+from wakeword.verifier import PhraseVerifier
 
 
 def main():
@@ -26,15 +27,44 @@ def main():
         default=None,
         help="Consecutive frames above threshold to trigger (1=fast, 3=stable)",
     )
+    p.add_argument(
+        "--verify-recordings",
+        type=Path,
+        default=None,
+        help="Reference recordings folder for MFCC/DTW phrase verification",
+    )
+    p.add_argument(
+        "--verify-negatives",
+        type=Path,
+        default=None,
+        help="Similar non-wake words used as anti-references",
+    )
+    p.add_argument("--verify-threshold", type=float, default=0.34)
+    p.add_argument("--verify-segment-threshold", type=float, default=0.20)
+    p.add_argument("--verify-negative-margin", type=float, default=0.04)
     args = p.parse_args()
 
     cfg = load_config()
     inf = cfg["inference"]
+    verifier = None
+    if args.verify_recordings:
+        verifier = PhraseVerifier(
+            args.verify_recordings,
+            negative_dir=args.verify_negatives,
+            threshold=args.verify_threshold,
+            segment_threshold=args.verify_segment_threshold,
+            negative_margin=args.verify_negative_margin,
+        )
+        print(f"Verifier: {args.verify_recordings}")
+        if args.verify_negatives:
+            print(f"Verifier negatives: {args.verify_negatives}")
+
     engine = WakeWordEngine(
         args.model,
         threshold=args.threshold or inf["threshold"],
         trigger_frames=args.trigger_frames if args.trigger_frames is not None else inf["trigger_frames"],
         refractory_sec=inf["refractory_sec"],
+        verifier=verifier,
     )
 
     sr = 16000
@@ -59,7 +89,24 @@ def main():
         pcm = (indata[:, 0] * 32767).astype(np.int16)
         score, fired = engine.process_chunk(pcm)
         if fired:
-            print(f"\n>>> WAKE! score={score:.3f}\n")
+            if engine.last_verification:
+                v = engine.last_verification
+                print(
+                    f"\n>>> WAKE! score={score:.3f} verify={v.score:.3f} "
+                    f"neg={v.negative_score:.3f} "
+                    f"segments={tuple(round(s, 3) for s in v.segment_scores)} ref={v.reference}\n"
+                )
+            else:
+                print(f"\n>>> WAKE! score={score:.3f}\n")
+        elif engine.last_verification and score >= engine.threshold:
+            v = engine.last_verification
+            print(
+                f"\rreject score={score:.3f} verify={v.score:.3f} "
+                f"neg={v.negative_score:.3f} "
+                f"segments={tuple(round(s, 3) for s in v.segment_scores)}",
+                end="",
+                flush=True,
+            )
         elif score > engine.threshold * 0.7:
             print(f"\rscore={score:.3f}", end="", flush=True)
 

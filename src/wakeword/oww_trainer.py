@@ -60,12 +60,27 @@ def _sample_batch(
     n_pos: int,
     n_neg: int,
     rng: np.random.Generator,
+    hard_neg: np.ndarray | None = None,
+    n_hard_neg: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Random mini-batch of positive and negative feature vectors."""
     pi = rng.integers(0, pos.shape[0], size=n_pos)
-    ni = rng.integers(0, neg.shape[0], size=n_neg)
-    x = np.vstack([pos[pi], neg[ni]]).astype(np.float32)
-    y = np.array([1.0] * n_pos + [0.0] * n_neg, dtype=np.float32)
+    parts = [pos[pi]]
+    labels = [1.0] * n_pos
+
+    n_platform_neg = n_neg
+    if hard_neg is not None and hard_neg.shape[0] > 0 and n_hard_neg > 0:
+        hi = rng.integers(0, hard_neg.shape[0], size=n_hard_neg)
+        parts.append(hard_neg[hi])
+        labels.extend([0.0] * n_hard_neg)
+        n_platform_neg = max(1, n_neg - n_hard_neg)
+
+    ni = rng.integers(0, neg.shape[0], size=n_platform_neg)
+    parts.append(neg[ni])
+    labels.extend([0.0] * n_platform_neg)
+
+    x = np.vstack(parts).astype(np.float32)
+    y = np.array(labels, dtype=np.float32)
     return torch.from_numpy(x), torch.from_numpy(y)
 
 
@@ -87,10 +102,12 @@ def train_and_export_onnx(
     neg_features_path: Path,
     output_onnx: Path,
     *,
+    hard_neg_features_path: Path | None = None,
     layer_size: int = 32,
     steps: int = 35000,
     n_pos_batch: int = 64,
     n_neg_batch: int = 960,
+    n_hard_neg_batch: int = 256,
     max_negative_weight: float = 1500.0,
     val_split: float = 0.15,
     device: str | None = None,
@@ -103,6 +120,12 @@ def train_and_export_onnx(
     neg = np.load(neg_features_path, mmap_mode="r")
     if pos.ndim != 3 or neg.ndim != 3:
         raise ValueError(f"Expected shape (N, 16, 96), got pos={pos.shape}, neg={neg.shape}")
+    hard_neg = None
+    if hard_neg_features_path and hard_neg_features_path.exists():
+        hard_neg = np.load(hard_neg_features_path, mmap_mode="r")
+        if hard_neg.ndim != 3:
+            raise ValueError(f"Expected hard negatives shape (N, 16, 96), got {hard_neg.shape}")
+        print(f"Hard negatives: {hard_neg.shape[0]} feature rows")
 
     input_shape = (int(pos.shape[1]), int(pos.shape[2]))
     n_val = max(1, int(pos.shape[0] * val_split))
@@ -117,10 +140,15 @@ def train_and_export_onnx(
     n_val_neg = min(2000, neg.shape[0])
     neg_val_idx = rng.integers(0, neg.shape[0], size=n_val_neg)
     neg_val = np.asarray(neg[neg_val_idx])
-    x_val = torch.from_numpy(np.vstack([pos_val, neg_val]).astype(np.float32))
-    y_val = torch.from_numpy(
-        np.array([1.0] * len(pos_val) + [0.0] * len(neg_val), dtype=np.float32)
-    )
+    val_parts = [pos_val, neg_val]
+    val_labels = [1.0] * len(pos_val) + [0.0] * len(neg_val)
+    if hard_neg is not None:
+        n_val_hard = min(500, hard_neg.shape[0])
+        hard_val_idx = rng.integers(0, hard_neg.shape[0], size=n_val_hard)
+        val_parts.append(np.asarray(hard_neg[hard_val_idx]))
+        val_labels.extend([0.0] * n_val_hard)
+    x_val = torch.from_numpy(np.vstack(val_parts).astype(np.float32))
+    y_val = torch.from_numpy(np.array(val_labels, dtype=np.float32))
 
     model = WakeWordDNN(input_shape=input_shape, layer_dim=layer_size).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -134,7 +162,15 @@ def train_and_export_onnx(
     for step in pbar:
         # Gradually increase weight on negatives to reduce false activations
         neg_w = 1.0 + (max_negative_weight - 1.0) * (step / max(steps - 1, 1))
-        x, y = _sample_batch(pos_train, neg, n_pos_batch, n_neg_batch, rng_train)
+        x, y = _sample_batch(
+            pos_train,
+            neg,
+            n_pos_batch,
+            n_neg_batch,
+            rng_train,
+            hard_neg=hard_neg,
+            n_hard_neg=n_hard_neg_batch,
+        )
         x, y = x.to(device), y.to(device)
 
         pred = model(x).squeeze(-1)

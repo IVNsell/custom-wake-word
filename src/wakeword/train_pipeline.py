@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -69,6 +70,7 @@ def train_user_phrase(
     recordings_dir: Path,
     cfg: dict | None = None,
     *,
+    hard_negatives_dir: Path | None = None,
     skip_oww_train: bool = False,
 ) -> Path:
     """
@@ -117,6 +119,21 @@ def train_user_phrase(
             f"Missing {neg_feat_path}. Run: python scripts/admin_build_negatives.py"
         )
 
+    hard_neg_feat: Path | None = None
+    hard_neg_files: list[Path] = []
+    if hard_negatives_dir:
+        hard_neg_files = sorted(hard_negatives_dir.glob("*.wav"))
+        if hard_neg_files:
+            hard_neg_wav_dir = work / "hard_negatives"
+            hard_neg_wav_dir.mkdir(parents=True, exist_ok=True)
+            for src in hard_neg_files:
+                shutil.copy2(src, hard_neg_wav_dir / src.name)
+            hard_neg_feat = work / "hard_negative_features.npy"
+            extract_features_from_wavs(hard_neg_wav_dir, hard_neg_feat)
+            print(f"OK: Hard negative features: {hard_neg_feat} ({len(hard_neg_files)} files)")
+        else:
+            print(f"WARN: No WAV hard negatives found in {hard_negatives_dir}")
+
     out_user = resolve_path(cfg, "user_output") / model_name
     out_user.mkdir(parents=True, exist_ok=True)
     onnx_dst = out_user / f"{model_name}.onnx"
@@ -131,16 +148,24 @@ def train_user_phrase(
         pos_feat,
         neg_feat_path,
         onnx_dst,
+        hard_neg_features_path=hard_neg_feat,
         layer_size=cfg["training"]["layer_size"],
         steps=cfg["training"]["steps"],
         max_negative_weight=cfg["training"]["max_negative_weight"],
         val_split=1.0 - cfg["training"]["train_split"],
     )
 
+    def file_meta(path: Path) -> dict[str, str | int]:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return {"name": path.name, "sha256": digest, "bytes": path.stat().st_size}
+
     meta = {
         "phrase": phrase,
         "model_name": model_name,
         "source_recordings": len(validation.files),
+        "source_files": [file_meta(p) for p in validation.files],
+        "hard_negative_recordings": len(hard_neg_files),
+        "hard_negative_files": [file_meta(p) for p in hard_neg_files],
         "augmented_clips": n_aug,
         "onnx": str(onnx_dst.name),
     }

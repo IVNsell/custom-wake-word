@@ -61,27 +61,57 @@ def extract_features_from_wavs(
 
     from openwakeword.utils import AudioFeatures
 
-    F = AudioFeatures()
-    clip_samples = int(16000 * clip_size_seconds)
+    feature_extractor = AudioFeatures()
+    frame_samples = 1280
+    pad_samples = 16000
+    activity_window = int(16000 * clip_size_seconds)
     rows: list[np.ndarray] = []
 
-    for i in tqdm(range(0, len(wavs), batch_size), desc="features"):
-        batch_paths = wavs[i : i + batch_size]
-        clips = []
-        for p in batch_paths:
-            import soundfile as sf
+    for p in tqdm(wavs, desc="features"):
+        import soundfile as sf
 
-            data, sr = sf.read(p, dtype="int16")
-            if data.ndim > 1:
-                data = data.mean(axis=1).astype(np.int16)
-            if sr != 16000:
-                from scipy import signal
+        data, sr = sf.read(p, dtype="int16")
+        if data.ndim > 1:
+            data = data.mean(axis=1).astype(np.int16)
+        if sr != 16000:
+            from scipy import signal
 
-                data = signal.resample(data, int(len(data) * 16000 / sr)).astype(np.int16)
-            clips.append(data)
-        stacked = _stack_clips(clips, clip_size=clip_samples)
-        feats = F.embed_clips(stacked, batch_size=batch_size)
-        rows.append(feats)
+            data = signal.resample(data, int(len(data) * 16000 / sr)).astype(np.int16)
+
+        # Match live inference: openWakeWord builds features from a rolling streaming buffer.
+        feature_extractor.reset()
+        padded = np.concatenate(
+            [
+                np.zeros(pad_samples, dtype=np.int16),
+                data.astype(np.int16),
+                np.zeros(pad_samples, dtype=np.int16),
+            ]
+        )
+
+        clip_rows: list[np.ndarray] = []
+        activity: list[float] = []
+        for start in range(0, len(padded) - frame_samples + 1, frame_samples):
+            chunk = padded[start : start + frame_samples]
+            feature_extractor(chunk)
+            if feature_extractor.feature_buffer.shape[0] < 16:
+                continue
+
+            end = start + frame_samples
+            window = padded[max(0, end - activity_window) : end].astype(np.float32)
+            rms = float(np.sqrt(np.mean(window**2))) if len(window) else 0.0
+            clip_rows.append(feature_extractor.get_features(16)[0])
+            activity.append(rms)
+
+        if not clip_rows:
+            continue
+
+        max_activity = max(activity) or 1.0
+        active_rows = [
+            row
+            for row, rms in zip(clip_rows, activity)
+            if rms >= max_activity * 0.15
+        ]
+        rows.append(np.stack(active_rows or clip_rows))
 
     features = np.vstack(rows).astype(np.float32)
     output_npy.parent.mkdir(parents=True, exist_ok=True)

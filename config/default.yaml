@@ -33,6 +33,7 @@ paths:
   catalog_dir: catalog/models
   catalog_manifest: catalog/manifest.json
   user_recordings: workspace/recordings
+  hard_negatives: workspace/hard_negatives
   user_output: output/user_models
   temp_training: workspace/training
 
