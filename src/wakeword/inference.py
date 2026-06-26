@@ -59,6 +59,7 @@ class WakeWordEngine:
             audio_int16 = np.asarray(audio_int16, dtype=np.int16)
         audio_int16 = audio_int16.astype(np.int16, copy=False)
         self._audio_buffer.extend(audio_int16.tolist())
+        self.last_verification = None
 
         pred = self._oww.predict(audio_int16)
         score = float(pred.get(self._model_key, 0.0))

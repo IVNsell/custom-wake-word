@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,11 @@ def main():
     p.add_argument("--verify-threshold", type=float, default=0.34)
     p.add_argument("--verify-segment-threshold", type=float, default=0.20)
     p.add_argument("--verify-negative-margin", type=float, default=0.04)
+    p.add_argument(
+        "--show-scores",
+        action="store_true",
+        help="Print near-threshold model scores for debugging",
+    )
     args = p.parse_args()
 
     cfg = load_config()
@@ -83,7 +89,13 @@ def main():
         print("Install: pip install sounddevice")
         sys.exit(1)
 
+    last_score_print = 0.0
+
+    def format_segments(values) -> str:
+        return "/".join(f"{v:.3f}" for v in values)
+
     def callback(indata, _frames, _time, status):
+        nonlocal last_score_print
         if status:
             print(status, file=sys.stderr)
         pcm = (indata[:, 0] * 32767).astype(np.int16)
@@ -92,23 +104,24 @@ def main():
             if engine.last_verification:
                 v = engine.last_verification
                 print(
-                    f"\n>>> WAKE! score={score:.3f} verify={v.score:.3f} "
+                    f"WAKE  model={score:.3f} verify={v.score:.3f} "
                     f"neg={v.negative_score:.3f} "
-                    f"segments={tuple(round(s, 3) for s in v.segment_scores)} ref={v.reference}\n"
+                    f"segments={format_segments(v.segment_scores)} ref={v.reference}"
                 )
             else:
-                print(f"\n>>> WAKE! score={score:.3f}\n")
-        elif engine.last_verification and score >= engine.threshold:
+                print(f"WAKE  model={score:.3f}")
+        elif engine.last_verification:
             v = engine.last_verification
             print(
-                f"\rreject score={score:.3f} verify={v.score:.3f} "
+                f"REJECT model={score:.3f} verify={v.score:.3f} "
                 f"neg={v.negative_score:.3f} "
-                f"segments={tuple(round(s, 3) for s in v.segment_scores)}",
-                end="",
-                flush=True,
+                f"segments={format_segments(v.segment_scores)}"
             )
-        elif score > engine.threshold * 0.7:
-            print(f"\rscore={score:.3f}", end="", flush=True)
+        elif args.show_scores and score > engine.threshold * 0.7:
+            now = time.monotonic()
+            if now - last_score_print >= 0.5:
+                print(f"SCORE model={score:.3f}")
+                last_score_print = now
 
     try:
         with sd.InputStream(samplerate=sr, channels=1, dtype="float32", blocksize=chunk, callback=callback):
