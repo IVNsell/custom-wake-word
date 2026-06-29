@@ -156,6 +156,45 @@ def _split_three(features: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarr
     return features[:a], features[a:b], features[b:]
 
 
+def _candidate_windows(
+    audio: np.ndarray,
+    sample_rate: int = 16000,
+    *,
+    window_secs: tuple[float, ...] | None = None,
+) -> list[np.ndarray]:
+    """Build tail-aligned windows from a live mic buffer.
+
+    The wake model can fire while the rolling buffer still contains older
+    silence or room noise. Trying several recent windows makes verification
+    much more stable than scoring the full buffer at once.
+    """
+    if audio.size == 0:
+        return [audio.astype(np.float32)]
+
+    audio = audio.astype(np.float32)
+    if window_secs is None:
+        window_secs = (0.7, 0.9, 1.1, 1.4, 1.8)
+
+    windows: list[np.ndarray] = []
+    seen_lengths: set[int] = set()
+    for sec in window_secs:
+        keep = int(sample_rate * sec)
+        chunk = audio[-keep:] if len(audio) > keep else audio
+        trimmed = _trim_silence(chunk, sample_rate)
+        if trimmed.size == 0:
+            continue
+        key = int(trimmed.size // (sample_rate * 0.05))
+        if key in seen_lengths:
+            continue
+        seen_lengths.add(key)
+        windows.append(trimmed)
+
+    if not windows:
+        fallback = audio[-int(sample_rate * 1.2) :] if len(audio) > 0 else audio
+        windows.append(_trim_silence(fallback, sample_rate))
+    return windows
+
+
 class PhraseVerifier:
     """MFCC + DTW phrase verifier using user reference recordings."""
 
@@ -164,8 +203,8 @@ class PhraseVerifier:
         reference_dir: str | Path,
         *,
         negative_dir: str | Path | None = None,
-        threshold: float = 0.34,
-        segment_threshold: float = 0.20,
+        threshold: float = 0.28,
+        segment_threshold: float = 0.15,
         negative_margin: float = 0.04,
         sample_rate: int = 16000,
     ):
@@ -186,6 +225,35 @@ class PhraseVerifier:
             feats = mfcc_features(audio, sample_rate)
             self.references.append((path.name, feats, _split_three(feats)))
 
+        ref_samples = []
+        for path in files:
+            audio = load_mono_16k(path, sample_rate).astype(np.float32) / 32768.0
+            trimmed = _trim_silence(audio, sample_rate)
+            ref_samples.append(max(trimmed.size, int(sample_rate * 0.4)))
+        ref_sec = float(np.median(ref_samples)) / sample_rate
+        self._window_secs = tuple(
+            sorted(
+                {
+                    max(0.6, ref_sec * 0.85),
+                    max(0.7, ref_sec),
+                    max(0.8, ref_sec * 1.15),
+                    max(0.9, ref_sec * 1.35),
+                    1.4,
+                    1.8,
+                }
+            )
+        )
+        self._live_window_secs = tuple(
+            sorted(
+                {
+                    max(0.6, ref_sec * 0.85),
+                    max(0.75, ref_sec * 1.0),
+                    max(0.85, ref_sec * 1.15),
+                    max(1.0, ref_sec * 1.35),
+                }
+            )
+        )
+
         if negative_dir:
             for path in sorted(Path(negative_dir).glob("*.wav")):
                 audio = load_mono_16k(path, sample_rate)
@@ -195,7 +263,47 @@ class PhraseVerifier:
     def _score_from_cost(cost: float) -> float:
         return float(np.exp(-3.0 * cost))
 
-    def verify(self, audio_int16_or_float: np.ndarray) -> VerificationResult:
+    def _score_reference(
+        self,
+        feats: np.ndarray,
+        cand_segments: tuple[np.ndarray, np.ndarray, np.ndarray],
+        name: str,
+        ref: np.ndarray,
+        ref_segments: tuple[np.ndarray, np.ndarray, np.ndarray],
+        *,
+        best_negative_score: float,
+    ) -> VerificationResult:
+        full_cost = _dtw_cost(feats, ref)
+        segment_costs = tuple(_dtw_cost(c, r) for c, r in zip(cand_segments, ref_segments))
+        segment_scores = tuple(self._score_from_cost(c) for c in segment_costs)
+        score = (
+            self._score_from_cost(full_cost) * 0.40
+            + segment_scores[0] * 0.18
+            + segment_scores[1] * 0.22
+            + segment_scores[2] * 0.20
+        )
+        segment_mean = float(np.mean(segment_scores))
+        accepted = (
+            score >= self.threshold
+            and min(segment_scores) >= self.segment_threshold
+            and score >= best_negative_score + self.negative_margin
+        ) or (
+            segment_mean >= self.threshold + 0.02
+            and min(segment_scores) >= self.segment_threshold
+            and score >= self.threshold - 0.03
+            and score >= best_negative_score + self.negative_margin
+        )
+        return VerificationResult(
+            accepted=accepted,
+            score=float(score),
+            negative_score=float(best_negative_score),
+            best_cost=full_cost,
+            reference=name,
+            negative_reference="",
+            segment_scores=segment_scores,
+        )
+
+    def verify(self, audio_int16_or_float: np.ndarray, *, fast: bool = False) -> VerificationResult:
         """Return whether candidate audio matches the reference phrase."""
         audio = np.asarray(audio_int16_or_float)
         if audio.dtype.kind in {"i", "u"}:
@@ -203,45 +311,52 @@ class PhraseVerifier:
         else:
             audio = audio.astype(np.float32)
 
-        feats = mfcc_features(audio, self.sample_rate)
-        cand_segments = _split_three(feats)
+        window_secs = self._live_window_secs if fast else self._window_secs
+        references = self.references
+        candidate_windows = _candidate_windows(
+            audio,
+            self.sample_rate,
+            window_secs=window_secs,
+        )
 
         best_negative_score = 0.0
         best_negative_name = ""
-        for name, neg in self.negative_references:
-            score = self._score_from_cost(_dtw_cost(feats, neg))
-            if score > best_negative_score:
-                best_negative_score = score
-                best_negative_name = name
+        for window in candidate_windows:
+            feats = mfcc_features(window, self.sample_rate)
+            for name, neg in self.negative_references:
+                score = self._score_from_cost(_dtw_cost(feats, neg))
+                if score > best_negative_score:
+                    best_negative_score = score
+                    best_negative_name = name
 
         best: VerificationResult | None = None
-        for name, ref, ref_segments in self.references:
-            full_cost = _dtw_cost(feats, ref)
-            segment_costs = tuple(_dtw_cost(c, r) for c, r in zip(cand_segments, ref_segments))
-            segment_scores = tuple(self._score_from_cost(c) for c in segment_costs)
-            # The end of the word is weighted because aizek/alex differ most there.
-            score = (
-                self._score_from_cost(full_cost) * 0.55
-                + segment_scores[0] * 0.10
-                + segment_scores[1] * 0.15
-                + segment_scores[2] * 0.20
-            )
-            accepted = (
-                score >= self.threshold
-                and min(segment_scores) >= self.segment_threshold
-                and score >= best_negative_score + self.negative_margin
-            )
-            result = VerificationResult(
-                accepted=accepted,
-                score=float(score),
-                negative_score=float(best_negative_score),
-                best_cost=full_cost,
-                reference=name,
-                negative_reference=best_negative_name,
-                segment_scores=segment_scores,
-            )
-            if best is None or result.score > best.score:
-                best = result
+        best_accepted: VerificationResult | None = None
+        for window in candidate_windows:
+            feats = mfcc_features(window, self.sample_rate)
+            cand_segments = _split_three(feats)
+            for name, ref, ref_segments in references:
+                result = self._score_reference(
+                    feats,
+                    cand_segments,
+                    name,
+                    ref,
+                    ref_segments,
+                    best_negative_score=best_negative_score,
+                )
+                result.negative_reference = best_negative_name
+                if best is None or result.score > best.score:
+                    best = result
+                if result.accepted and (
+                    best_accepted is None or result.score >= best_accepted.score
+                ):
+                    best_accepted = result
+                if (
+                    fast
+                    and best_accepted is not None
+                    and best_accepted.score >= self.threshold + 0.06
+                ):
+                    assert best is not None
+                    return best_accepted
 
         assert best is not None
-        return best
+        return best_accepted or best

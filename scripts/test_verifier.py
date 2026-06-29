@@ -70,8 +70,8 @@ def main():
     )
     p.add_argument("--threshold", type=float, default=0.9)
     p.add_argument("--trigger-frames", type=int, default=2)
-    p.add_argument("--verify-threshold", type=float, default=0.34)
-    p.add_argument("--verify-segment-threshold", type=float, default=0.20)
+    p.add_argument("--verify-threshold", type=float, default=0.28)
+    p.add_argument("--verify-segment-threshold", type=float, default=0.15)
     p.add_argument("--verify-negative-margin", type=float, default=0.04)
     args = p.parse_args()
 

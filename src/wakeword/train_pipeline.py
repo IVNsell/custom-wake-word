@@ -152,6 +152,10 @@ def train_user_phrase(
         layer_size=cfg["training"]["layer_size"],
         steps=cfg["training"]["steps"],
         max_negative_weight=cfg["training"]["max_negative_weight"],
+        confuser_weight=cfg["training"].get("confuser_weight", 4000),
+        n_confuser_batch=cfg["training"].get("confuser_batch", 384),
+        mine_confusers=cfg["training"].get("mine_confusers", True),
+        confuser_top_k=cfg["training"].get("confuser_top_k", 2500),
         val_split=1.0 - cfg["training"]["train_split"],
     )
 

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -40,9 +42,13 @@ def main():
         default=None,
         help="Similar non-wake words used as anti-references",
     )
-    p.add_argument("--verify-threshold", type=float, default=0.34)
-    p.add_argument("--verify-segment-threshold", type=float, default=0.20)
+    p.add_argument("--verify-threshold", type=float, default=0.28)
+    p.add_argument("--verify-segment-threshold", type=float, default=0.15)
     p.add_argument("--verify-negative-margin", type=float, default=0.04)
+    p.add_argument("--verify-trust-model", type=float, default=0.95,
+                   help="When model score is this high, use a slightly lower verify bar")
+    p.add_argument("--verify-trust-threshold", type=float, default=0.24,
+                   help="Minimum verify score when --verify-trust-model is met")
     p.add_argument(
         "--show-scores",
         action="store_true",
@@ -71,6 +77,7 @@ def main():
         trigger_frames=args.trigger_frames if args.trigger_frames is not None else inf["trigger_frames"],
         refractory_sec=inf["refractory_sec"],
         verifier=verifier,
+        defer_verification=verifier is not None,
     )
 
     sr = 16000
@@ -89,34 +96,88 @@ def main():
         print("Install: pip install sounddevice")
         sys.exit(1)
 
+    verify_jobs: queue.Queue[tuple[np.ndarray, float] | None] = queue.Queue(maxsize=2)
+    verify_results: queue.Queue[tuple[float, object]] = queue.Queue()
+    overflow_notice_at = 0.0
+
+    def verify_worker():
+        while True:
+            job = verify_jobs.get()
+            if job is None:
+                break
+            snapshot, model_score = job
+            result = verifier.verify(snapshot, fast=False)
+            verify_results.put((model_score, result))
+
+    worker = None
+    if verifier is not None:
+        worker = threading.Thread(target=verify_worker, daemon=True)
+        worker.start()
+
     last_score_print = 0.0
+    last_reject_key = ""
+    last_reject_at = 0.0
 
     def format_segments(values) -> str:
         return "/".join(f"{v:.3f}" for v in values)
 
+    def should_accept(model_score: float, result) -> bool:
+        if result.accepted:
+            return True
+        if model_score >= args.verify_trust_model and result.score >= args.verify_trust_threshold:
+            return min(result.segment_scores) >= args.verify_segment_threshold
+        return False
+
+    def print_verification(score: float, result, accepted: bool) -> None:
+        nonlocal last_reject_key, last_reject_at
+        if accepted:
+            print(
+                f"WAKE  model={score:.3f} verify={result.score:.3f} "
+                f"neg={result.negative_score:.3f} "
+                f"segments={format_segments(result.segment_scores)} ref={result.reference}"
+            )
+            return
+
+        reject_key = f"{result.score:.3f}|{'/'.join(f'{v:.3f}' for v in result.segment_scores)}"
+        now = time.monotonic()
+        if reject_key == last_reject_key and now - last_reject_at < 0.35:
+            return
+        last_reject_key = reject_key
+        last_reject_at = now
+        print(
+            f"REJECT model={score:.3f} verify={result.score:.3f} "
+            f"neg={result.negative_score:.3f} "
+            f"segments={format_segments(result.segment_scores)}"
+        )
+
     def callback(indata, _frames, _time, status):
-        nonlocal last_score_print
+        nonlocal last_score_print, overflow_notice_at
         if status:
-            print(status, file=sys.stderr)
+            now = time.monotonic()
+            if "overflow" in str(status).lower() and now - overflow_notice_at > 2.0:
+                print("Mic buffer overflow — retrying with safer audio settings.", file=sys.stderr)
+                overflow_notice_at = now
         pcm = (indata[:, 0] * 32767).astype(np.int16)
         score, fired = engine.process_chunk(pcm)
+
+        pending = engine.consume_pending()
+        if pending is not None and verifier is not None:
+            snapshot, pending_score = pending
+            while True:
+                try:
+                    verify_jobs.get_nowait()
+                except queue.Empty:
+                    break
+            try:
+                verify_jobs.put_nowait((snapshot, pending_score))
+            except queue.Full:
+                pass
+
         if fired:
             if engine.last_verification:
-                v = engine.last_verification
-                print(
-                    f"WAKE  model={score:.3f} verify={v.score:.3f} "
-                    f"neg={v.negative_score:.3f} "
-                    f"segments={format_segments(v.segment_scores)} ref={v.reference}"
-                )
+                print_verification(score, engine.last_verification, accepted=True)
             else:
                 print(f"WAKE  model={score:.3f}")
-        elif engine.last_verification:
-            v = engine.last_verification
-            print(
-                f"REJECT model={score:.3f} verify={v.score:.3f} "
-                f"neg={v.negative_score:.3f} "
-                f"segments={format_segments(v.segment_scores)}"
-            )
         elif args.show_scores and score > engine.threshold * 0.7:
             now = time.monotonic()
             if now - last_score_print >= 0.5:
@@ -124,10 +185,34 @@ def main():
                 last_score_print = now
 
     try:
-        with sd.InputStream(samplerate=sr, channels=1, dtype="float32", blocksize=chunk, callback=callback):
+        stream_kwargs = dict(
+            samplerate=sr,
+            channels=1,
+            dtype="float32",
+            blocksize=chunk,
+            callback=callback,
+            latency="high",
+        )
+        try:
+            stream = sd.InputStream(**stream_kwargs)
+        except TypeError:
+            stream_kwargs.pop("latency", None)
+            stream = sd.InputStream(**stream_kwargs)
+
+        with stream:
             while True:
-                sd.sleep(1000)
+                try:
+                    score, result = verify_results.get(timeout=0.05)
+                except queue.Empty:
+                    sd.sleep(50)
+                    continue
+                accepted = should_accept(score, result)
+                engine.apply_verification(result, accepted=accepted)
+                print_verification(score, result, accepted=accepted)
     except KeyboardInterrupt:
+        if worker is not None:
+            verify_jobs.put(None)
+            worker.join(timeout=1.0)
         print("\nExit.")
         sys.exit(0)
 

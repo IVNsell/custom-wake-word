@@ -25,6 +25,11 @@ training:
   model_type: dnn
   target_false_positives_per_hour: 0.2
   max_negative_weight: 1500
+  # Auto-mine confusers from shared_negatives.npy (similar speech/noise, no named words)
+  mine_confusers: true
+  confuser_top_k: 2500
+  confuser_weight: 4000
+  confuser_batch: 384
   optional_tts_positives: 2000
 
 paths:
